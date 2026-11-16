@@ -13,7 +13,8 @@ Aturan:
 - Kalau ditanya soal faction atau player, WAJIB rujuk ke data yang diberikan.
 - Boleh pakai list atau bold singkat kalau membantu. UI sudah mendukung format Markdown (seperti **bold**, - list, dan ### header), jadi gunakanlah agar rapi.
 - Kalau data tidak cukup, bilang saja — jangan ngarang.
-- "Kantong" = nomor slot server (id di data). "CC" = Crimson Creed. Faction lain sudah disebut di data.`;
+- PENTING: "Kantong" = nomor slot server (id di data). 
+- PENTING: "CC" SELALU merujuk pada faction "Crimson Creed". Jika user bertanya "ada berapa CC", maksudnya adalah berapa banyak player dari faction Crimson Creed, BUKAN "Character Count" atau hal lainnya.`;
 
 export async function POST(req: Request) {
   try {
@@ -63,10 +64,14 @@ export async function POST(req: Request) {
     }
 
     const data = await res.json();
-    const text =
+    let text =
       data?.content?.find((c: any) => c.type === 'text')?.text ??
       data?.content?.[0]?.text ??
       'Tidak ada respons.';
+
+    // FILTER PENTING: Hapus tag <think>...</think> agar tidak muncul di UI
+    text = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
     return NextResponse.json({ text });
   } catch (err: any) {
     console.error('[AI]', err);
