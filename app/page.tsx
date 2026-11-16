@@ -49,11 +49,23 @@ const PAGE_SIZE = 25;
 const fmt = (n: number) => n.toLocaleString('id-ID');
 function pingClass(p: number) { if (p < 80) return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'; if (p < 150) return 'bg-amber-500/10 text-amber-500 border-amber-500/20'; return 'bg-red-500/10 text-red-500 border-red-500/20'; }
 function formatTime(ms: number) { const totalSecs = Math.floor(ms / 1000); const h = Math.floor(totalSecs / 3600); const m = Math.floor((totalSecs % 3600) / 60); const s = totalSecs % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
+
 function renderMarkdown(text: string) {
-  return text.split('\n').map((line, i) => {
+  // Bersihkan tag <think> jika masih lolos dari backend
+  const cleanText = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
+  return cleanText.split('\n').map((line, i) => {
     const parseBold = (str: string) => str.split(/(\*\*.*?\*\*)/g).map((part, j) => part.startsWith('**') && part.endsWith('**') ? <strong key={j} className="font-semibold text-accent">{part.slice(2, -2)}</strong> : part);
-    if (line.startsWith('### ') || line.startsWith('## ') || line.startsWith('# ')) { const level = line.match(/^#+/)?.[0].length || 1; return <div key={i} className={`font-semibold text-main mt-3 mb-1 ${level === 1 ? 'text-base' : 'text-sm'}`}>{line.replace(/^#+\s+/, '')}</div>; }
-    if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) return <div key={i} className="flex gap-2 ml-1 my-0.5"><span className="text-subtle">•</span><span>{parseBold(line.replace(/^[-*]\s+/, ''))}</span></div>;
+    
+    if (line.startsWith('### ') || line.startsWith('## ') || line.startsWith('# ')) { 
+      const level = line.match(/^#+/)?.[0].length || 1; 
+      return <div key={i} className={`font-semibold text-main mt-3 mb-1 ${level === 1 ? 'text-base' : 'text-sm'}`}>{line.replace(/^#+\s+/, '')}</div>; 
+    }
+    
+    if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
+      return <div key={i} className="flex gap-2 ml-1 my-0.5"><span className="text-subtle">•</span><span>{parseBold(line.replace(/^[-*]\s+/, ''))}</span></div>;
+    }
+    
     if (!line.trim()) return <div key={i} className="h-2" />;
     return <div key={i} className="my-0.5">{parseBold(line)}</div>;
   });
@@ -195,27 +207,27 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-app">
-      <header className="flex items-center justify-between border-b border-line bg-card px-6 py-4 shadow-sm">
+      <header className="flex items-center justify-between border-b border-line bg-card px-4 py-4 shadow-sm sm:px-6">
         <div>
-          <h1 className="text-xl font-bold flex items-center gap-2">
+          <h1 className="text-lg font-bold flex items-center gap-2 sm:text-xl">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-500">
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
             </span>
-            Admin Control Center
+            Admin Center
           </h1>
-          <p className="text-sm text-muted">Selamat datang, Hans. Kelola akses user dari sini.</p>
+          <p className="text-xs text-muted mt-1 sm:text-sm">Selamat datang, Hans.</p>
         </div>
         <button onClick={onClose} className="rounded-lg bg-hover px-4 py-2 text-sm font-medium hover:bg-line transition">Tutup Panel</button>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         <div className="mx-auto max-w-6xl space-y-6">
           
           {/* Toolbar */}
           <div className="flex flex-col sm:flex-row justify-between gap-4">
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {['ALL', 'PENDING', 'APPROVED', 'BANNED'].map(f => (
-                <button key={f} onClick={() => setFilter(f)} className={`rounded-lg px-4 py-2 text-sm font-medium transition ${filter === f ? 'bg-accent text-accent-text' : 'bg-card border border-line text-muted hover:text-main'}`}>{f}</button>
+                <button key={f} onClick={() => setFilter(f)} className={`rounded-lg px-4 py-2 text-xs font-medium transition sm:text-sm ${filter === f ? 'bg-accent text-accent-text' : 'bg-card border border-line text-muted hover:text-main'}`}>{f}</button>
               ))}
             </div>
             <div className="relative w-full sm:w-64">
@@ -225,92 +237,72 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
 
           {/* Table */}
           <div className="rounded-xl border border-line bg-card overflow-hidden">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-hover text-subtle text-xs uppercase">
-                <tr>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">IP Address & Device ID</th>
-                  <th className="px-4 py-3">Terakhir Aktif</th>
-                  <th className="px-4 py-3 text-right">Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(r => {
-                  const isOnline = new Date(r.lastActive).getTime() > Date.now() - 60000;
-                  return (
-                    <tr key={r.id} className="border-t border-line hover:bg-hover/50 transition">
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-2">
-                          <span className={`h-2.5 w-2.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-line'}`} title={isOnline ? 'Online' : 'Offline'} />
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            r.status === 'APPROVED' ? 'bg-emerald-500/20 text-emerald-500' :
-                            r.status === 'PENDING' ? 'bg-amber-500/20 text-amber-500' :
-                            r.status === 'BANNED' ? 'bg-red-500/20 text-red-500' : 'bg-gray-500/20 text-gray-500'
-                          }`}>{r.status}</span>
-                          {r.timeoutUntil && new Date(r.timeoutUntil) > new Date() && (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-500">TIMEOUT</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="font-medium text-main">{r.ipAddress}</div>
-                        <div className="font-mono text-[11px] text-subtle mt-0.5">{r.deviceId}</div>
-                      </td>
-                      <td className="px-4 py-4 text-muted text-xs">
-                        {new Date(r.lastActive).toLocaleString('id-ID')}
-                      </td>
-                      
-                      {/* KOLOM AKSI DENGAN FITUR UNTIMEOUT & UNBAN */}
-                      <td className="px-4 py-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          
-                          {/* Jika Banned, tampilkan tombol Unban */}
-                          {r.status === 'BANNED' ? (
-                            <button onClick={() => updateStatus(r.id, 'REVOKE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-3 py-1 rounded text-xs font-medium transition">
-                              Unban
-                            </button>
-                          
-                          /* Jika Timeout, tampilkan tombol Hapus Timeout */
-                          ) : r.timeoutUntil && new Date(r.timeoutUntil) > new Date() ? (
-                            <button onClick={() => updateStatus(r.id, 'CLEAR_TIMEOUT')} className="bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 px-3 py-1 rounded text-xs font-medium transition">
-                              Hapus Timeout
-                            </button>
-                          
-                          /* Jika Normal, tampilkan Approve/Revoke, Timeout, Ban */
-                          ) : (
-                            <>
-                              {r.status !== 'APPROVED' && (
-                                <button onClick={() => updateStatus(r.id, 'APPROVE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-2 py-1 rounded text-xs font-medium transition">
-                                  Approve
-                                </button>
-                              )}
-                              
-                              {r.status === 'APPROVED' && (
-                                <button onClick={() => updateStatus(r.id, 'REVOKE')} className="bg-hover text-muted hover:text-main px-2 py-1 rounded text-xs font-medium transition">
-                                  Revoke
-                                </button>
-                              )}
-                              
-                              <div className="h-4 w-px bg-line mx-1" />
-                              
-                              <button onClick={() => updateStatus(r.id, 'TIMEOUT_1H')} className="text-orange-500 hover:bg-orange-500/10 px-2 py-1 rounded text-xs font-medium transition" title="Beri waktu jeda 1 Jam">
-                                1H
-                              </button>
-                              
-                              <button onClick={() => updateStatus(r.id, 'BAN')} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-xs font-medium transition">
-                                Ban
-                              </button>
-                            </>
-                          )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left whitespace-nowrap">
+                <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
+                  <tr>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">IP Address & Device ID</th>
+                    <th className="px-4 py-3">Terakhir Aktif</th>
+                    <th className="px-4 py-3 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(r => {
+                    const isOnline = new Date(r.lastActive).getTime() > Date.now() - 60000;
+                    return (
+                      <tr key={r.id} className="border-t border-line hover:bg-hover/50 transition">
+                        <td className="px-4 py-4">
+                          <div className="flex items-center gap-2">
+                            <span className={`h-2.5 w-2.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-line'}`} title={isOnline ? 'Online' : 'Offline'} />
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              r.status === 'APPROVED' ? 'bg-emerald-500/20 text-emerald-500' :
+                              r.status === 'PENDING' ? 'bg-amber-500/20 text-amber-500' :
+                              r.status === 'BANNED' ? 'bg-red-500/20 text-red-500' : 'bg-gray-500/20 text-gray-500'
+                            }`}>{r.status}</span>
+                            {r.timeoutUntil && new Date(r.timeoutUntil) > new Date() && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-500">TIMEOUT</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-4">
+                          <div className="font-medium text-main">{r.ipAddress}</div>
+                          <div className="font-mono text-[11px] text-subtle mt-0.5">{r.deviceId}</div>
+                        </td>
+                        <td className="px-4 py-4 text-muted text-xs">
+                          {new Date(r.lastActive).toLocaleString('id-ID')}
+                        </td>
+                        
+                        <td className="px-4 py-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            
+                            {r.status === 'BANNED' ? (
+                              <button onClick={() => updateStatus(r.id, 'REVOKE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-3 py-1 rounded text-xs font-medium transition">Unban</button>
+                            ) : r.timeoutUntil && new Date(r.timeoutUntil) > new Date() ? (
+                              <button onClick={() => updateStatus(r.id, 'CLEAR_TIMEOUT')} className="bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 px-3 py-1 rounded text-xs font-medium transition">Hapus Timeout</button>
+                            ) : (
+                              <>
+                                {r.status !== 'APPROVED' && (
+                                  <button onClick={() => updateStatus(r.id, 'APPROVE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-2 py-1 rounded text-xs font-medium transition">Approve</button>
+                                )}
+                                {r.status === 'APPROVED' && (
+                                  <button onClick={() => updateStatus(r.id, 'REVOKE')} className="bg-hover text-muted hover:text-main px-2 py-1 rounded text-xs font-medium transition">Revoke</button>
+                                )}
+                                <div className="h-4 w-px bg-line mx-1" />
+                                <button onClick={() => updateStatus(r.id, 'TIMEOUT_1H')} className="text-orange-500 hover:bg-orange-500/10 px-2 py-1 rounded text-xs font-medium transition" title="Beri waktu jeda 1 Jam">1H</button>
+                                <button onClick={() => updateStatus(r.id, 'BAN')} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-xs font-medium transition">Ban</button>
+                              </>
+                            )}
 
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {filtered.length === 0 && <tr><td colSpan={4} className="px-4 py-10 text-center text-subtle">Tidak ada data request.</td></tr>}
-              </tbody>
-            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filtered.length === 0 && <tr><td colSpan={4} className="px-4 py-10 text-center text-subtle">Tidak ada data request.</td></tr>}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -335,7 +327,6 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
   const [compactMode, setCompactMode] = useState(false);
   const [countdown, setCountdown] = useState<{ diffMs: number, target: Date } | null>(null);
 
-  // Settings Load & Apply
   useEffect(() => {
     const savedTheme = localStorage.getItem('ime-theme') as any;
     if (savedTheme) setTheme(savedTheme);
@@ -352,7 +343,6 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
   useEffect(() => { localStorage.setItem('ime-refresh', String(refreshMs)); }, [refreshMs]);
   useEffect(() => { localStorage.setItem('ime-compact', String(compactMode)); }, [compactMode]);
 
-  // Timer Logic (Restart 06:00 & 18:00 WIB)
   useEffect(() => {
     const updateTimer = () => {
       const now = new Date();
@@ -372,7 +362,6 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
     return () => clearInterval(id);
   }, []);
 
-  // Fetch Players Data
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -396,7 +385,6 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
     return () => clearInterval(id);
   }, [load, refreshMs]);
 
-  // Data Processing
   const enriched = useMemo(() => (data?.players ?? []).map(p => ({ ...p, faction: detectFaction(p.name) })), [data]);
   const counts = useMemo(() => {
     const c: Record<string, number> = { SEMUA: enriched.length };
@@ -434,8 +422,8 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
   return (
     <main className="min-h-screen bg-app text-main">
       {/* ── Floating pill nav ── */}
-      <div className="fixed top-3 left-1/2 z-40 w-full max-w-[100vw] -translate-x-1/2 px-3">
-        <div className="relative mx-auto max-w-fit">
+      <div className="fixed top-3 left-0 right-0 z-40 flex justify-center px-3">
+        <div className="relative w-full max-w-fit">
           <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-8 bg-gradient-to-r from-app to-transparent rounded-l-full" />
           <div className="no-scrollbar flex items-center gap-1 overflow-x-auto rounded-full border border-line bg-nav px-1.5 py-1.5 shadow-lg backdrop-blur-md">
             {navCats.map(cat => {
@@ -460,7 +448,7 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
       </div>
 
       <div className="mx-auto max-w-5xl px-4 pb-16 pt-20 sm:px-6">
-        <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <header className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-subtle">IME Roleplay</div>
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Player Monitor</h1>
@@ -470,7 +458,8 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
           <div className="flex flex-wrap items-center gap-2">
             {countdown && (
               <div className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-mono transition-colors ${isWarning ? 'border-red-500/50 bg-red-500/10 text-red-500' : 'border-line bg-card text-muted'}`}>
-                <span>Restart dalam</span>
+                <span className="hidden sm:inline">Restart dalam</span>
+                <span className="sm:hidden">Restart</span>
                 <span className="font-bold">{formatTime(countdown.diffMs)}</span>
               </div>
             )}
@@ -494,8 +483,8 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
         </header>
 
         {isWarning && (
-          <div className="mb-6 flex items-start sm:items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500 animate-pulse">
-            <svg className="h-5 w-5 shrink-0 mt-0.5 sm:mt-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+          <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500 animate-pulse">
+            <svg className="h-5 w-5 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
             <div><span className="font-bold tracking-wide">PERINGATAN BADAI:</span> Server akan direstart dalam <span className="font-mono font-bold">{formatTime(countdown.diffMs)}</span>.</div>
           </div>
         )}
@@ -513,22 +502,23 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
           </div>
         )}
 
-        <div className="mb-4 flex flex-wrap gap-3">
-          <div className="relative min-w-[220px] flex-1">
+        {/* Search & Refresh (Full width on Mobile) */}
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+          <div className="relative flex-1">
             <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
             <input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari nama atau kantong…" className="w-full rounded-lg border border-line bg-card py-2.5 pl-10 pr-4 text-sm text-main placeholder-subtle outline-none transition focus:border-accent/50 focus:ring-2 focus:ring-accent/15" />
           </div>
-          <button onClick={load} disabled={refreshing} className="inline-flex items-center gap-2 rounded-lg border border-line bg-card px-4 py-2.5 text-sm font-medium text-main transition hover:border-accent/40 disabled:opacity-40">
+          <button onClick={load} disabled={refreshing} className="inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-card px-4 py-2.5 text-sm font-medium text-main transition hover:border-accent/40 disabled:opacity-40 sm:w-auto w-full">
             <RefreshIcon className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
           </button>
         </div>
 
         <div className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm whitespace-nowrap">
               <thead>
                 <tr className={`border-b border-line bg-hover text-left text-[10px] font-semibold uppercase tracking-wider text-subtle ${compactMode ? 'h-9' : 'h-11'}`}>
-                  <th className="w-28 px-4">Kantong</th>
+                  <th className="w-24 px-4">Kantong</th>
                   <th className="px-4">Nama</th>
                   <th className="w-20 px-4 text-right">Ping</th>
                 </tr>
@@ -546,7 +536,7 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
                       <td className="px-4">
                         <div className="flex items-center gap-2">
                           <span className={`inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold ${fac.badge}`}>{fac.short}</span>
-                          <span className="truncate text-[13px] text-main">{p.name}</span>
+                          <span className="truncate text-[13px] text-main max-w-[120px] sm:max-w-none">{p.name}</span>
                         </div>
                       </td>
                       <td className="px-4 text-right"><span className={`inline-flex rounded border px-2 py-0.5 font-mono text-[11px] font-medium ${pingClass(p.ping)}`}>{p.ping}</span></td>
@@ -558,12 +548,13 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted">
-          <div>Auto-refresh {refreshMs/1000} detik · {filtered.length} player</div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setPage(Math.max(0, safePage - 1))} disabled={safePage <= 0} className="rounded-md border border-line bg-card px-3 py-1.5 font-medium text-main transition hover:border-accent/40 disabled:opacity-30">← Prev</button>
+        {/* Footer & Pagination (Mobile Optimized) */}
+        <div className="mt-4 flex flex-col items-center justify-between gap-4 text-xs text-muted sm:flex-row">
+          <div className="order-2 sm:order-1">Auto-refresh {refreshMs/1000} detik · {filtered.length} player</div>
+          <div className="order-1 flex w-full items-center justify-between gap-2 sm:order-2 sm:w-auto">
+            <button onClick={() => setPage(Math.max(0, safePage - 1))} disabled={safePage <= 0} className="flex-1 rounded-lg border border-line bg-card py-2 font-medium text-main transition hover:border-accent/40 disabled:opacity-30 sm:flex-none sm:px-4 sm:py-1.5">← Prev</button>
             <span className="min-w-[52px] text-center font-mono text-muted">{safePage + 1}/{totalPages}</span>
-            <button onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))} disabled={safePage >= totalPages - 1} className="rounded-md border border-line bg-card px-3 py-1.5 font-medium text-main transition hover:border-accent/40 disabled:opacity-30">Next →</button>
+            <button onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))} disabled={safePage >= totalPages - 1} className="flex-1 rounded-lg border border-line bg-card py-2 font-medium text-main transition hover:border-accent/40 disabled:opacity-30 sm:flex-none sm:px-4 sm:py-1.5">Next →</button>
           </div>
         </div>
       </div>
