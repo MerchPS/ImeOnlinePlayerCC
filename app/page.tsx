@@ -186,7 +186,6 @@ export default function App() {
   const [isBlurred, setIsBlurred] = useState(false);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
 
-  // Changelog & Bug Report States
   const [showChangelog, setShowChangelog] = useState(false);
   const [bugReportOpen, setBugReportOpen] = useState(false);
 
@@ -196,11 +195,8 @@ export default function App() {
     setDeviceId(id);
     setSettings(loadSettings());
 
-    // Cek apakah changelog harus muncul
     const lastVersion = localStorage.getItem('ime-changelog-version');
-    if (lastVersion !== 'v1.2') {
-      setShowChangelog(true);
-    }
+    if (lastVersion !== 'v1.2') setShowChangelog(true);
   }, []);
 
   useEffect(() => {
@@ -286,7 +282,6 @@ export default function App() {
       
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} current={settings} onSave={handleSaveSettings} />
       
-      {/* Popup Changelog */}
       {showChangelog && (
         <ChangelogModal onClose={() => {
           localStorage.setItem('ime-changelog-version', 'v1.2');
@@ -294,7 +289,6 @@ export default function App() {
         }} />
       )}
 
-      {/* Floating Bug Report Button */}
       <button
         onClick={() => setBugReportOpen(true)}
         className="fixed bottom-6 right-6 z-[80] flex h-14 w-14 items-center justify-center rounded-full bg-red-500 text-white shadow-lg shadow-red-500/30 transition-all hover:scale-110 active:scale-95"
@@ -583,9 +577,17 @@ function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => voi
 
   const saveFaction = async () => {
     if (!form.label.trim() || !form.short.trim()) return;
-    const res = await fetch('/api/factions', { method: form.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
-    if (!res.ok) { alert('Gagal menyimpan faction.'); return; }
-    setForm(EMPTY_FORM); fetchData();
+    try {
+      const res = await fetch('/api/factions', { method: form.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      if (!res.ok) {
+        const errText = await res.text();
+        alert('Gagal menyimpan faction: ' + errText);
+        return;
+      }
+      setForm(EMPTY_FORM); fetchData();
+    } catch (e: any) {
+      alert('Error: ' + e.message);
+    }
   };
 
   const startEdit = (f: FactionDef) => {
@@ -680,7 +682,6 @@ function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => voi
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         <div className="mx-auto max-w-6xl space-y-6">
           
-          {/* TAB REPORTS */}
           {activeTab === 'reports' && (
             <div className="rounded-xl border border-line bg-card overflow-hidden">
               <div className="overflow-x-auto">
@@ -717,7 +718,6 @@ function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => voi
             </div>
           )}
 
-          {/* TAB REQUESTS */}
           {activeTab === 'requests' && (
             <>
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -787,10 +787,173 @@ function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => voi
             </>
           )}
 
-          {/* (Sisa tab Factions, Audit, Admins sama persis seperti kodemu sebelumnya) */}
-          {/* ... */}
+          {activeTab === 'factions' && isSuper && (
+            <div className="space-y-6">
+              <div className="rounded-xl border border-line bg-card p-5">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-sm font-bold">{form.id ? `Edit Faction: ${form.label}` : 'Tambah Faction Baru'}</h3>
+                  {form.id && <button onClick={() => setForm(EMPTY_FORM)} className="text-xs text-muted hover:text-main">Batal edit</button>}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Label (Nama Lengkap)</label><input type="text" value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} placeholder="Government" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Short (pisahkan koma untuk alias)</label><input type="text" value={form.short} onChange={e => setForm({ ...form, short: e.target.value.toUpperCase() })} placeholder="GOV,PEMKOT" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted mb-1 block">Match Type</label>
+                    <select value={form.matchType} onChange={e => setForm({ ...form, matchType: e.target.value })} className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent">
+                      <option value="INCLUDES">INCLUDES (Mengandung)</option><option value="STARTS_WITH">STARTS_WITH (Diawali)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted mb-1 block">Kelompok (Side)</label>
+                    <select value={form.side} onChange={e => setForm({ ...form, side: e.target.value as Side })} className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent">
+                      <option value="NONE">Otomatis / Tidak ada</option><option value="GOOD">Good Side</option><option value="BAD">Bad Side</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted mb-1 block">Warna</label>
+                    <div className="flex items-center gap-2">
+                      <input type="color" value={form.color} onChange={e => setForm({ ...form, color: e.target.value })} className="h-9 w-12 cursor-pointer rounded-md border border-line bg-app p-0.5" />
+                      <input type="text" value={form.color} onChange={e => setForm({ ...form, color: e.target.value })} className="w-full rounded-lg border border-line bg-app px-3 py-2 font-mono text-sm text-main outline-none focus:border-accent" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted mb-1 block">Preview</label>
+                    <div className="flex items-center gap-3 rounded-lg border border-line bg-app px-3 py-1.5">
+                      <FactionTag fac={{ short: form.short || 'TAG', badge: form.badge, dot: form.dot, color: form.color }} variant="pill" />
+                      <FactionTag fac={{ short: form.short || 'TAG', badge: form.badge, dot: form.dot, color: form.color }} variant="widget" />
+                    </div>
+                  </div>
+                </div>
+                <details className="mt-4 text-xs text-muted">
+                  <summary className="cursor-pointer select-none hover:text-main">Lanjutan: class Tailwind manual (dipakai jika warna kosong)</summary>
+                  <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <input type="text" value={form.badge} onChange={e => setForm({ ...form, badge: e.target.value })} placeholder="bg-blue-500/10 text-blue-500 border-blue-500/20" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
+                    <input type="text" value={form.dot} onChange={e => setForm({ ...form, dot: e.target.value })} placeholder="bg-blue-500" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
+                  </div>
+                </details>
+                <div className="mt-4 flex justify-end">
+                  <button onClick={saveFaction} className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover transition">{form.id ? 'Simpan Perubahan' : 'Tambah Faction'}</button>
+                </div>
+              </div>
+              <div className="rounded-xl border border-line bg-card overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
+                      <tr><th className="px-4 py-3">Label</th><th className="px-4 py-3">Short</th><th className="px-4 py-3">Match</th><th className="px-4 py-3">Side</th><th className="px-4 py-3">Preview</th><th className="px-4 py-3 text-right">Aksi</th></tr>
+                    </thead>
+                    <tbody>
+                      {factions.map(f => (
+                        <tr key={f.id} className="border-t border-line hover:bg-hover/50 transition">
+                          <td className="px-4 py-3 font-medium text-main">{f.label}</td>
+                          <td className="px-4 py-3 font-mono text-muted">{f.short}</td>
+                          <td className="px-4 py-3 text-xs text-subtle">{f.matchType}</td>
+                          <td className="px-4 py-3 text-xs"><span className={f.side === 'GOOD' ? 'text-emerald-500' : f.side === 'BAD' ? 'text-red-500' : 'text-subtle'}>{f.side && f.side !== 'NONE' ? f.side : 'auto'}</span></td>
+                          <td className="px-4 py-3"><FactionTag fac={f} variant="pill" /></td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            <button onClick={() => startEdit(f)} className="text-accent hover:bg-accent/10 px-2 py-1 rounded text-xs font-medium transition">Edit</button>
+                            <button onClick={() => deleteFaction(f.id)} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-xs font-medium transition">Hapus</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'audit' && isSuper && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-end gap-3 rounded-xl border border-line bg-card p-4">
+                <div><label className="mb-1 block text-[11px] font-semibold text-muted">Admin</label>
+                  <select value={logAdmin} onChange={e => setLogAdmin(e.target.value)} className="rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent">
+                    <option value="ALL">Semua</option>{adminNames.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select></div>
+                <div><label className="mb-1 block text-[11px] font-semibold text-muted">Dari</label><input type="date" value={logFrom} onChange={e => setLogFrom(e.target.value)} className="rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                <div><label className="mb-1 block text-[11px] font-semibold text-muted">Sampai</label><input type="date" value={logTo} onChange={e => setLogTo(e.target.value)} className="rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                <div className="min-w-[160px] flex-1"><label className="mb-1 block text-[11px] font-semibold text-muted">Cari</label><input type="text" value={logText} onChange={e => setLogText(e.target.value)} placeholder="aksi / target / detail" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                <button onClick={exportLogs} disabled={filteredLogs.length === 0} className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover disabled:opacity-40"><DownloadIcon className="h-4 w-4" />Ekspor CSV ({filteredLogs.length})</button>
+              </div>
+              <div className="rounded-xl border border-line bg-card overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left whitespace-nowrap">
+                    <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
+                      <tr><th className="px-4 py-3">Waktu</th><th className="px-4 py-3">Admin</th><th className="px-4 py-3">Aksi</th><th className="px-4 py-3">Target</th><th className="px-4 py-3">Detail</th></tr>
+                    </thead>
+                    <tbody>
+                      {filteredLogs.map(l => (
+                        <tr key={l.id} className="border-t border-line hover:bg-hover/50 transition">
+                          <td className="px-4 py-3 text-muted text-xs">{formatDate(l.createdAt)}</td>
+                          <td className="px-4 py-3 font-medium text-main">{l.adminName}</td>
+                          <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-hover text-main border border-line">{l.action}</span></td>
+                          <td className="px-4 py-3 font-mono text-[11px] text-subtle">{l.targetDeviceId}</td>
+                          <td className="px-4 py-3 text-muted text-xs">{l.details || '-'}</td>
+                        </tr>
+                      ))}
+                      {filteredLogs.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-subtle">Tidak ada log.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'admins' && isSuper && (
+            <div className="space-y-6">
+              <div className="rounded-xl border border-line bg-card p-5">
+                <h3 className="mb-4 text-sm font-bold">Tambah Admin / Moderator</h3>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+                  <input type="text" value={newAdmin.name} onChange={e => setNewAdmin({ ...newAdmin, name: e.target.value })} placeholder="Nama" className="rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
+                  <input type="text" value={newAdmin.deviceId} onChange={e => setNewAdmin({ ...newAdmin, deviceId: e.target.value })} placeholder="Device ID" className="rounded-lg border border-line bg-app px-3 py-2 font-mono text-sm text-main outline-none focus:border-accent sm:col-span-2" />
+                  <select value={newAdmin.role} onChange={e => setNewAdmin({ ...newAdmin, role: e.target.value as Role })} className="rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent">
+                    <option value="MOD">Moderator</option><option value="SUPER">Super Admin</option>
+                  </select>
+                </div>
+                <div className="mt-4 flex justify-end"><button onClick={addAdmin} className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover">Tambah</button></div>
+                <p className="mt-2 text-[11px] text-subtle">Moderator hanya bisa mengelola user (ACC / timeout / ban). Faction, log, dan admin hanya untuk Super Admin.</p>
+              </div>
+              <div className="rounded-xl border border-line bg-card overflow-hidden">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs"><tr><th className="px-4 py-3">Nama</th><th className="px-4 py-3">Device ID</th><th className="px-4 py-3">Role</th><th className="px-4 py-3 text-right">Aksi</th></tr></thead>
+                  <tbody>
+                    {admins.map(a => (
+                      <tr key={a.id} className="border-t border-line hover:bg-hover/50">
+                        <td className="px-4 py-3 font-medium text-main">{a.name}</td>
+                        <td className="px-4 py-3 font-mono text-[11px] text-subtle">{a.deviceId}</td>
+                        <td className="px-4 py-3"><span className={`rounded px-2 py-0.5 text-[10px] font-bold ${a.role === 'SUPER' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-blue-500/20 text-blue-500'}`}>{a.role}</span></td>
+                        <td className="px-4 py-3 text-right"><button onClick={() => removeAdmin(a.id)} className="rounded px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-500/10">Cabut</button></td>
+                      </tr>
+                    ))}
+                    {admins.length === 0 && <tr><td colSpan={4} className="px-4 py-10 text-center text-subtle">Belum ada data.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {actionModal && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-line bg-card p-5 shadow-2xl">
+            <h3 className="text-lg font-bold text-main mb-4">{actionModal.type === 'BAN' ? 'Blokir Permanen (Ban)' : 'Beri Jeda (Timeout)'}</h3>
+            <label className="text-xs font-semibold text-muted mb-1 block">Alasan</label>
+            <input type="text" value={reasonInput} onChange={e => setReasonInput(e.target.value)} placeholder="Contoh: Spam request..." className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent mb-3" />
+            {actionModal.type === 'TIMEOUT' && (
+              <>
+                <label className="text-xs font-semibold text-muted mb-1 block">Durasi (Menit)</label>
+                <select value={durationInput} onChange={e => setDurationInput(e.target.value)} className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent mb-4">
+                  <option value="15">15 Menit</option><option value="60">1 Jam</option><option value="360">6 Jam</option><option value="1440">24 Jam</option>
+                </select>
+              </>
+            )}
+            <div className="flex justify-end gap-2 mt-2">
+              <button onClick={() => setActionModal(null)} className="rounded-lg px-4 py-2 text-sm font-medium text-muted hover:text-main">Batal</button>
+              <button onClick={() => executeAction(actionModal.id!, actionModal.type, reasonInput, Number(durationInput))} className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${actionModal.type === 'BAN' ? 'bg-red-500 hover:bg-red-600' : 'bg-orange-500 hover:bg-orange-600'}`}>Konfirmasi</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1463,183 +1626,4 @@ function HistoryModal({ open, onClose, sessions, onlineNames, watch, onToggleWat
                   {r.online ? <span className="text-emerald-500">● Online · sesi {fmtDuration(Date.now() - (r.rec.start ?? Date.now()))}</span> : <>Terakhir: {timeAgo(r.rec.last)}</>}
                 </div>
               </div>
-              <div className="text-right text-[11px] text-muted"><div className="font-mono text-main">{fmtDuration(r.rec.total + r.cur)}</div><div>{r.rec.count}× sesi</div></div>
-            </div>
-          ))}
-        </div>
-        <div className="border-t border-line bg-app px-5 py-2 text-[10px] text-subtle">Dicatat dari browser ini hanya saat halaman terbuka, jadi angka bisa lebih kecil dari waktu main sebenarnya.</div>
-      </div>
-    </div>
-  );
-}
-
-/* ══════════════ Settings Modal ══════════════ */
-function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button onClick={() => onChange(!on)} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${on ? 'bg-accent' : 'bg-hover'}`}>
-      <span className={`absolute top-1 left-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${on ? 'translate-x-5' : 'translate-x-0'}`} />
-    </button>
-  );
-}
-
-function SettingsModal({ open, onClose, current, onSave }: { open: boolean; onClose: () => void; current: Settings; onSave: (s: Settings) => void }) {
-  const [draft, setDraft] = useState<Settings>(current);
-  useEffect(() => { if (open) setDraft(current); }, [open, current]);
-  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setDraft(d => ({ ...d, [k]: v }));
-
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={onClose} />
-      <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-line bg-card shadow-2xl animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between border-b border-line px-5 py-4 sticky top-0 bg-card z-10">
-          <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15"><GearIcon className="h-4 w-4 text-accent" /></span>
-            <div><div className="text-sm font-semibold text-main">Pengaturan</div><div className="text-[11px] text-subtle">Tampilan & preferensi</div></div>
-          </div>
-          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
-        </div>
-        <div className="space-y-6 px-5 py-5">
-          <div>
-            <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Tema Tampilan</div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {([
-                { id: 'dark', label: 'Dark', bg: 'bg-[#0c0a08]', border: 'border-[#2a2520]' },
-                { id: 'light', label: 'Light', bg: 'bg-[#f8fafc]', border: 'border-[#e2e8f0]' },
-                { id: 'glass', label: 'Glass', bg: 'bg-[#09090b]', border: 'border-white/10' },
-                { id: 'cyberpunk', label: 'Cyberpunk', bg: 'bg-[#050505]', border: 'border-[#fcee0a]' },
-                { id: 'nord', label: 'Nord', bg: 'bg-[#2e3440]', border: 'border-[#4c566a]' },
-              ] as { id: Theme; label: string; bg: string; border: string }[]).map(t => (
-                <button key={t.id} onClick={() => set('theme', t.id)} className={`group relative flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${draft.theme === t.id ? 'border-accent ring-2 ring-accent/20' : 'border-line hover:border-accent/40'}`}>
-                  <div className={`h-10 w-full rounded-md border ${t.bg} ${t.border} flex items-center justify-center`}><div className={`h-1.5 w-6 rounded-full ${draft.theme === t.id ? 'bg-accent' : 'bg-line'}`} /></div>
-                  <span className={`text-xs font-medium ${draft.theme === t.id ? 'text-accent' : 'text-muted group-hover:text-main'}`}>{t.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <hr className="border-line" />
-
-          <div>
-            <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Gaya Tag Faction</div>
-            <div className="flex rounded-lg border border-line bg-app p-1">
-              <button onClick={() => set('tagStyle', 'pill')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${draft.tagStyle === 'pill' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Pill (Bulat)</button>
-              <button onClick={() => set('tagStyle', 'widget')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${draft.tagStyle === 'widget' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Widget (Soft Card)</button>
-            </div>
-          </div>
-
-          <hr className="border-line" />
-          <div>
-            <div className="mb-3 flex items-center justify-between"><div className="text-[11px] font-semibold uppercase tracking-wider text-subtle">Interval Refresh</div><div className="text-[11px] text-muted">{draft.refreshMs / 1000} detik</div></div>
-            <div className="flex rounded-lg border border-line bg-app p-1">
-              {[30, 60, 120].map(s => (
-                <button key={s} onClick={() => set('refreshMs', s * 1000)} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${draft.refreshMs === s * 1000 ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>{s} Detik</button>
-              ))}
-            </div>
-          </div>
-
-          <hr className="border-line" />
-          <div className="flex items-center justify-between">
-            <div><div className="text-sm font-medium text-main">Mode Ringkas</div><div className="text-[11px] text-muted mt-0.5">Kurangi jarak antar baris tabel agar muat lebih banyak.</div></div>
-            <Toggle on={draft.compact} onChange={v => set('compact', v)} />
-          </div>
-        </div>
-        <div className="border-t border-line bg-app px-5 py-3 text-right sticky bottom-0 z-10">
-          <button onClick={() => onSave(draft)} className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-text transition hover:bg-accent-hover">Simpan & Tutup</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ══════════════ AI Drawer ══════════════ */
-function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factionMap }: any) {
-  const [msgs, setMsgs] = useState<AiMsg[]>([]);
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [msgs, sending]);
-
-  const buildContext = useCallback(() => {
-    if (!data) return null;
-    const factionSummary: any = {};
-    for (const [id, count] of Object.entries(counts)) {
-      if (id === 'SEMUA' || id === 'GOOD' || id === 'BAD' || id === 'CIVILIAN' || !count) continue;
-      const f = factionMap.get(id);
-      factionSummary[id] = { label: f?.label || 'Unknown', count };
-    }
-    return { totalOnline: data.online, maxSlots: data.max, gate: data.gate, updatedAt: data.updatedAt, currentFilter: activeCat, factions: factionSummary, players: enriched.slice(0, 150).map((p: any) => ({ kantong: p.id, nama: p.name, faction: factionMap.get(p.faction)?.label || 'Untagged', ping: p.ping })) };
-  }, [data, counts, activeCat, enriched, factionMap]);
-
-  async function send(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed || sending) return;
-    const next: AiMsg[] = [...msgs, { role: 'user', content: trimmed }];
-    setMsgs(next); setInput(''); setSending(true);
-    try {
-      const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: next, context: buildContext() }) });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Gagal');
-      setMsgs([...next, { role: 'assistant', content: json.text }]);
-    } catch (e: any) { setMsgs([...next, { role: 'assistant', content: `⚠ ${e.message}` }]); } finally { setSending(false); }
-  }
-
-  const SUGGESTIONS = ['Ringkas siapa saja yang online sekarang', 'Faction apa yang paling banyak online?', 'Siapa saja polisi (LSPD/LSSD) yang online?', 'Ada berapa CC dan siapa nama mereka?', 'Player mana yang pingnya paling buruk?'];
-
-  return (
-    <div className={`fixed inset-0 z-50 ${open ? '' : 'pointer-events-none'}`}>
-      <div onClick={onClose} className={`absolute inset-0 bg-black/50 transition-opacity ${open ? 'opacity-100' : 'opacity-0'}`} />
-      <aside className={`absolute right-0 top-0 flex h-full w-full flex-col border-l border-line bg-app transition-transform duration-300 sm:w-[440px] ${open ? 'translate-x-0' : 'translate-x-full'}`}>
-        <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15"><SparkIcon className="h-4 w-4 text-accent" /></span><div><div className="text-sm font-semibold text-main">Analisis AI</div><div className="text-[11px] text-subtle">Konteks data realtime</div></div></div>
-          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
-        </div>
-        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-          {msgs.length === 0 && (<div className="space-y-3"><p className="text-sm text-muted">Tanya apa saja soal server yang lagi online. Contoh:</p><div className="flex flex-col gap-2">{SUGGESTIONS.map(s => (<button key={s} onClick={() => send(s)} className="rounded-lg border border-line bg-card px-3 py-2 text-left text-[13px] text-muted transition hover:border-accent/40 hover:bg-hover hover:text-main">{s}</button>))}</div></div>)}
-          {msgs.map((m, i) => (<div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed ${m.role === 'user' ? 'bg-accent text-accent-text whitespace-pre-wrap' : 'border border-line bg-card text-main'}`}>{m.role === 'user' ? m.content : renderMarkdown(m.content)}</div></div>))}
-          {sending && (<div className="flex justify-start"><div className="flex gap-1 rounded-xl border border-line bg-card px-3.5 py-3"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '0ms' }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '150ms' }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '300ms' }} /></div></div>)}
-        </div>
-        <div className="border-t border-line p-3">
-          <form onSubmit={e => { e.preventDefault(); send(input); }} className="flex gap-2">
-            <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }} placeholder="Tanya soal player, faction, ping…" rows={1} className="flex-1 resize-none rounded-lg border border-line bg-card px-3 py-2 text-[13px] text-main placeholder-subtle outline-none transition focus:border-accent/50 focus:ring-2 focus:ring-accent/15" />
-            <button type="submit" disabled={sending || !input.trim()} className="flex shrink-0 items-center justify-center rounded-lg bg-accent px-3 text-accent-text transition hover:bg-accent-hover disabled:opacity-30"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg></button>
-          </form>
-        </div>
-      </aside>
-    </div>
-  );
-}
-
-/* ══════════════ UI Bits & Icons ══════════════ */
-function Stat({ label, value, accent, small, pulse, delta }: any) {
-  return (
-    <div className="rounded-xl border border-line bg-card p-4 shadow-sm">
-      <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-subtle">
-        {pulse && (
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
-          </span>
-        )}
-        {label}
-      </div>
-      <div className="flex items-baseline gap-2">
-        <div className={`mt-1 truncate font-semibold ${accent} ${small ? 'text-base' : 'text-xl'}`}>{value}</div>
-        {delta !== null && delta !== undefined && delta !== 0 && (
-          <span className={`text-[10px] font-bold ${delta > 0 ? 'text-emerald-500' : 'text-red-500'}`}>{delta > 0 ? `+${delta}` : delta}</span>
-        )}
-      </div>
-    </div>
-  );
-}
-function SearchIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>); }
-function RefreshIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>); }
-function SparkIcon({ className }: any) { return (<svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z" /></svg>); }
-function GearIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>); }
-function ClockIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>); }
-function StarIcon({ className, filled }: any) { return (<svg className={className} fill={filled ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>); }
-function DownloadIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>); }
-function LinkIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>); }
-function BugIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>); }
+              <div className="text-right text-[11px] text-muted"><div className="font-mono text-main">{fmtDuration(r.rec.total + r.cur)}
