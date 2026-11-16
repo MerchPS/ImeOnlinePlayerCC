@@ -16,9 +16,11 @@ model User {
 }
 
 model AccessRequest {
-  id        String   @id @default(uuid())
-  ipAddress String
-  deviceId  String   @unique
-  status    String   @default("PENDING")
-  createdAt DateTime @default(now())
+  id           String    @id @default(uuid())
+  ipAddress    String
+  deviceId     String    @unique
+  status       String    @default("PENDING") // PENDING, APPROVED, REJECTED, BANNED
+  timeoutUntil DateTime?
+  lastActive   DateTime  @default(now())
+  createdAt    DateTime  @default(now())
 }
