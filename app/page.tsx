@@ -113,20 +113,23 @@ export default function App() {
     return () => clearInterval(interval);
   }, [deviceId]);
 
-  // ══════════ ANTI-SCREENSHOT LOGIC ══════════
+  // ══════════ ANTI-SCREENSHOT LOGIC (DOUBLE LAYER) ══════════
   useEffect(() => {
-    // 1. Detect tab change, app switch, or minimize
+    // LAYER 1: Inject library Anti-Screenshot PRO
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/gh/Lovsan/anti-screenshot-PRO@main/anti-screenshot.js';
+    script.async = true;
+    document.body.appendChild(script);
+
+    // LAYER 2: React Native Blur & Keyboard Protection
     const handleVisibilityChange = () => {
       if (document.hidden) setIsBlurred(true);
       else setTimeout(() => setIsBlurred(false), 300);
     };
-    
-    // 2. Detect window blur (e.g., Snipping Tool or Alt+Tab)
     const handleBlur = () => setIsBlurred(true);
     const handleFocus = () => setTimeout(() => setIsBlurred(false), 300);
     const handlePageHide = () => setIsBlurred(true);
 
-    // 3. Block Keyboard Shortcuts (PrintScreen, Ctrl+P, Ctrl+S, Ctrl+U)
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && ['p', 's', 'u'].includes(e.key.toLowerCase())) {
         e.preventDefault();
@@ -138,7 +141,6 @@ export default function App() {
       }
     };
 
-    // 4. Block Right Click
     const handleContextMenu = (e: MouseEvent) => e.preventDefault();
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -149,6 +151,7 @@ export default function App() {
     document.addEventListener('contextmenu', handleContextMenu);
 
     return () => {
+      document.body.removeChild(script);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('focus', handleFocus);
@@ -191,7 +194,6 @@ export default function App() {
         {authStatus === 'ADMIN' && <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />}
       </div>
 
-      {/* Modal Settings (Di luar blur agar tetap bisa dilihat saat buka settings, tapi tidak apa-apa kalau kena blur juga) */}
       <SettingsModal 
         open={settingsOpen} 
         onClose={() => setSettingsOpen(false)} 
@@ -905,7 +907,6 @@ function SettingsModal({
   const [refreshMs, setRefreshMs] = useState(currentRefresh);
   const [compactMode, setCompactMode] = useState(currentCompact);
 
-  // Sync state lokal jika modal dibuka ulang
   useEffect(() => {
     if (open) {
       setTheme(currentTheme);
