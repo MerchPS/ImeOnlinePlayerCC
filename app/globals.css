@@ -39,18 +39,21 @@
   [data-theme="cyberpunk"] body { background-image: linear-gradient(rgba(252, 238, 10, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(252, 238, 10, 0.03) 1px, transparent 1px); background-size: 20px 20px; }
 }
 
+/* Proteksi Anti-Screenshot */
+@media print {
+  body { display: none !important; }
+}
+
+* {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+
 /* Sembunyikan scrollbar untuk HP */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
 
-/* Scrollbar tipis untuk PC (Dynamic Island) */
-.custom-scrollbar::-webkit-scrollbar { height: 4px; }
-.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: var(--border-line-hover); border-radius: 4px; }
-.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--accent); }
-.custom-scrollbar { scrollbar-width: thin; scrollbar-color: var(--border-line-hover) transparent; }
-
-/* Scrollbar Global */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-line); border-radius: 4px; }
