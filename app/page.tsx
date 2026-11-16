@@ -23,16 +23,12 @@ function formatDate(iso: string) { return new Date(iso).toLocaleString('id-ID', 
 // FUNGSI SAKTI: Menghapus simbol aneh, mendukung koma (RCMC,RC1 / ALLSTAR,ALLSTARS)
 function detectFaction(name: string, factions: FactionDef[]): string {
   const prefix = name.split(' - ')[0].trim();
-  
-  // Bersihkan semua simbol aneh seperti % atau spasi
   const cleanPrefix = prefix.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   const cleanFullName = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
-  // Urutkan dari yang paling panjang (HTH akan diproses sebelum HT)
   const sortedFactions = [...factions].sort((a, b) => b.short.length - a.short.length);
 
   for (const f of sortedFactions) {
-    // Pisahkan alias berdasarkan koma (misal: "RCMC,RC1" jadi ["RCMC", "RC1"])
     const aliases = f.short.split(',').map(s => s.replace(/[^a-zA-Z0-9]/g, '').toUpperCase());
     
     for (const alias of aliases) {
@@ -69,12 +65,13 @@ export default function App() {
   const [authMeta, setAuthMeta] = useState<{ timeoutUntil?: string; reason?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
-
   const [isBlurred, setIsBlurred] = useState(false);
 
+  // Settings State
   const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
   const [refreshMs, setRefreshMs] = useState(60000);
   const [compactMode, setCompactMode] = useState(false);
+  const [tagStyle, setTagStyle] = useState<'pill' | 'widget'>('pill'); // State Baru untuk Gaya Tag
 
   useEffect(() => {
     let id = localStorage.getItem('ime-device-id');
@@ -87,6 +84,8 @@ export default function App() {
     if (savedRefresh) setRefreshMs(Number(savedRefresh));
     const savedCompact = localStorage.getItem('ime-compact');
     if (savedCompact) setCompactMode(savedCompact === 'true');
+    const savedTag = localStorage.getItem('ime-tag-style') as any;
+    if (savedTag) setTagStyle(savedTag);
   }, []);
 
   useEffect(() => {
@@ -94,12 +93,14 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  const handleSaveSettings = (newTheme: any, newRefresh: number, newCompact: boolean) => {
+  const handleSaveSettings = (newTheme: any, newRefresh: number, newCompact: boolean, newTag: 'pill' | 'widget') => {
     setTheme(newTheme);
     setRefreshMs(newRefresh);
     setCompactMode(newCompact);
+    setTagStyle(newTag);
     localStorage.setItem('ime-refresh', String(newRefresh));
     localStorage.setItem('ime-compact', String(newCompact));
+    localStorage.setItem('ime-tag-style', newTag);
     setSettingsOpen(false);
   };
 
@@ -118,11 +119,17 @@ export default function App() {
     return () => clearInterval(interval);
   }, [deviceId]);
 
+  // ══════════ ANTI-SCREENSHOT LOGIC (FIXED FOR MOBILE) ══════════
   useEffect(() => {
+    // 1. Blur jika pindah tab / minimize (Buka Recent Apps)
     const handleVisibilityChange = () => { if (document.hidden) setIsBlurred(true); else setTimeout(() => setIsBlurred(false), 300); };
+    
+    // 2. Blur jika jendela kehilangan fokus (Buka Snipping Tool / Alt+Tab)
     const handleBlur = () => setIsBlurred(true);
     const handleFocus = () => setTimeout(() => setIsBlurred(false), 300);
     const handlePageHide = () => setIsBlurred(true);
+    
+    // 3. Blokir PrintScreen & Shortcut (Hanya PC)
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && ['p', 's', 'u'].includes(e.key.toLowerCase())) e.preventDefault();
       if (e.key === 'PrintScreen') {
@@ -131,8 +138,6 @@ export default function App() {
         setTimeout(() => setIsBlurred(false), 2000);
       }
     };
-    const handleTouchStart = () => setIsBlurred(true);
-    const handleTouchEnd = () => setTimeout(() => setIsBlurred(false), 800);
     const handleContextMenu = (e: MouseEvent) => e.preventDefault();
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -141,8 +146,6 @@ export default function App() {
     window.addEventListener('pagehide', handlePageHide);
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('contextmenu', handleContextMenu);
-    window.addEventListener('touchstart', handleTouchStart, { passive: true });
-    window.addEventListener('touchend', handleTouchEnd, { passive: true });
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -151,8 +154,6 @@ export default function App() {
       window.removeEventListener('pagehide', handlePageHide);
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('contextmenu', handleContextMenu);
-      window.removeEventListener('touchstart', handleTouchStart);
-      window.removeEventListener('touchend', handleTouchEnd);
     };
   }, []);
 
@@ -178,6 +179,7 @@ export default function App() {
           isAdmin={authStatus === 'ADMIN'} 
           refreshMs={refreshMs} 
           compactMode={compactMode}
+          tagStyle={tagStyle}
           onOpenSettings={() => setSettingsOpen(true)} 
           onOpenAdmin={() => setAdminOpen(true)} 
         />
@@ -189,6 +191,7 @@ export default function App() {
         currentTheme={theme}
         currentRefresh={refreshMs}
         currentCompact={compactMode}
+        currentTag={tagStyle}
         onSave={handleSaveSettings}
       />
     </div>
@@ -497,7 +500,7 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
 }
 
 /* ══════════════ Main Home (Player Monitor) ══════════════ */
-function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, refreshMs: number, compactMode: boolean, onOpenSettings: () => void, onOpenAdmin: () => void }) {
+function Home({ isAdmin, refreshMs, compactMode, tagStyle, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, refreshMs: number, compactMode: boolean, tagStyle: 'pill' | 'widget', onOpenSettings: () => void, onOpenAdmin: () => void }) {
   const [data, setData] = useState<ApiData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -695,11 +698,20 @@ function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: 
                       <td className="px-4"><span className="inline-flex items-center rounded-md border border-line bg-app px-2 py-0.5 font-mono text-[11px] font-medium text-main">#{p.id}</span></td>
                       <td className="px-4">
                         <div className="flex items-center gap-2">
-                          {/* WIDGET STYLE BADGE */}
-                          <div className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${fac.badge}`}>
-                            <span className={`h-1.5 w-1.5 rounded-full ${fac.dot}`} />
-                            {fac.short.split(',')[0]}
-                          </div>
+                          
+                          {/* PENGATURAN GAYA TAG (PILL vs WIDGET) */}
+                          {tagStyle === 'pill' ? (
+                            <div className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${fac.badge}`}>
+                              <span className={`h-1.5 w-1.5 rounded-full ${fac.dot}`} />
+                              {fac.short.split(',')[0]}
+                            </div>
+                          ) : (
+                            <div className={`inline-flex shrink-0 items-center gap-1.5 rounded-[3px] border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shadow-sm ${fac.badge}`}>
+                              <span className={`h-1.5 w-1.5 rounded-sm ${fac.dot}`} />
+                              {fac.short.split(',')[0]}
+                            </div>
+                          )}
+
                           <span className="truncate text-[13px] text-main max-w-[120px] sm:max-w-none">{p.name}</span>
                         </div>
                       </td>
@@ -728,22 +740,28 @@ function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: 
 }
 
 /* ══════════════ Settings Modal ══════════════ */
-function SettingsModal({ open, onClose, currentTheme, currentRefresh, currentCompact, onSave }: any) {
+function SettingsModal({ open, onClose, currentTheme, currentRefresh, currentCompact, currentTag, onSave }: any) {
   const [theme, setTheme] = useState(currentTheme);
   const [refreshMs, setRefreshMs] = useState(currentRefresh);
   const [compactMode, setCompactMode] = useState(currentCompact);
+  const [tagStyle, setTagStyle] = useState(currentTag);
 
   useEffect(() => {
-    if (open) { setTheme(currentTheme); setRefreshMs(currentRefresh); setCompactMode(currentCompact); }
-  }, [open, currentTheme, currentRefresh, currentCompact]);
+    if (open) { 
+      setTheme(currentTheme); 
+      setRefreshMs(currentRefresh); 
+      setCompactMode(currentCompact); 
+      setTagStyle(currentTag);
+    }
+  }, [open, currentTheme, currentRefresh, currentCompact, currentTag]);
 
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={onClose} />
-      <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-line bg-card shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-        <div className="flex items-center justify-between border-b border-line px-5 py-4">
+      <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-line bg-card shadow-2xl animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between border-b border-line px-5 py-4 sticky top-0 bg-card z-10">
           <div className="flex items-center gap-2">
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15"><GearIcon className="h-4 w-4 text-accent" /></span>
             <div><div className="text-sm font-semibold text-main">Pengaturan</div><div className="text-[11px] text-subtle">Tampilan & preferensi</div></div>
@@ -768,6 +786,18 @@ function SettingsModal({ open, onClose, currentTheme, currentRefresh, currentCom
               ))}
             </div>
           </div>
+          
+          <hr className="border-line" />
+          
+          {/* SETTING GAYA TAG */}
+          <div>
+            <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Gaya Tag Faction</div>
+            <div className="flex rounded-lg border border-line bg-app p-1">
+              <button onClick={() => setTagStyle('pill')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${tagStyle === 'pill' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Pill (Bulat)</button>
+              <button onClick={() => setTagStyle('widget')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${tagStyle === 'widget' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Widget (Kotak)</button>
+            </div>
+          </div>
+
           <hr className="border-line" />
           <div>
             <div className="mb-3 flex items-center justify-between"><div className="text-[11px] font-semibold uppercase tracking-wider text-subtle">Interval Refresh</div><div className="text-[11px] text-muted">{refreshMs / 1000} detik</div></div>
@@ -783,8 +813,8 @@ function SettingsModal({ open, onClose, currentTheme, currentRefresh, currentCom
             <button onClick={() => setCompactMode(!compactMode)} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${compactMode ? 'bg-accent' : 'bg-hover'}`}><span className={`absolute top-1 left-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${compactMode ? 'translate-x-5' : 'translate-x-0'}`} /></button>
           </div>
         </div>
-        <div className="border-t border-line bg-app px-5 py-3 text-right">
-          <button onClick={() => onSave(theme, refreshMs, compactMode)} className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-text transition hover:bg-accent-hover">Simpan & Tutup</button>
+        <div className="border-t border-line bg-app px-5 py-3 text-right sticky bottom-0 z-10">
+          <button onClick={() => onSave(theme, refreshMs, compactMode, tagStyle)} className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-text transition hover:bg-accent-hover">Simpan & Tutup</button>
         </div>
       </div>
     </div>
