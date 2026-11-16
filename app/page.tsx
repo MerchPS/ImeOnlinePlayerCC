@@ -23,10 +23,12 @@ function formatDate(iso: string) { return new Date(iso).toLocaleString('id-ID', 
 // PERBAIKAN: Mendukung Multiple Aliases (RCMC,RC1) & Mengurutkan dari yang terpanjang (HTH sebelum HT)
 function detectFaction(name: string, factions: FactionDef[]): string {
   const prefix = name.split(' - ')[0].trim();
+  
+  // Bersihkan semua simbol aneh seperti % atau spasi
   const cleanPrefix = prefix.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   const cleanFullName = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
-  // Urutkan dari yang paling panjang (HTH akan diproses sebelum HT)
+  // Urutkan dari yang paling panjang
   const sortedFactions = [...factions].sort((a, b) => b.short.length - a.short.length);
 
   for (const f of sortedFactions) {
@@ -71,7 +73,7 @@ export default function App() {
   // Anti-Screenshot State
   const [isBlurred, setIsBlurred] = useState(false);
 
-  // Theme & Settings State
+  // Theme & Settings State (Lifted to App)
   const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
   const [refreshMs, setRefreshMs] = useState(60000);
   const [compactMode, setCompactMode] = useState(false);
@@ -174,6 +176,8 @@ export default function App() {
 
   return (
     <div className="relative min-h-screen bg-app text-main overflow-hidden">
+      
+      {/* Konten Utama (Akan Terkena Blur saat Screenshot) */}
       <div className={`transition-all duration-300 ease-out ${isBlurred ? 'blur-[30px] scale-[0.95] opacity-10 pointer-events-none' : ''}`}>
         <Home 
           isAdmin={authStatus === 'ADMIN'} 
@@ -588,7 +592,7 @@ function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: 
   const navCats = useMemo(() => {
     const items = [
       { id: 'SEMUA', short: 'Semua', dot: 'bg-accent' },
-      ...factions.map(f => ({ id: f.id, short: f.short.split(',')[0], dot: f.dot })), // Tampilkan alias pertama
+      ...factions.map(f => ({ id: f.id, short: f.short.split(',')[0], dot: f.dot })), // Tampilkan alias pertama di nav
       { id: 'WARGA', short: WARGA.short, dot: WARGA.dot }
     ];
     return items.filter(it => (counts[it.id] ?? 0) > 0 || it.id === activeCat);
@@ -723,6 +727,7 @@ function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: 
           </div>
         </div>
       </div>
+
       <AIDrawer open={aiOpen} onClose={() => setAiOpen(false)} data={data} enriched={enriched} counts={counts} activeCat={activeCat} factions={factions} />
     </main>
   );
