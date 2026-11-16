@@ -27,6 +27,14 @@ model AccessRequest {
   createdAt       DateTime  @default(now())
 }
 
+model BugReport {
+  id        String   @id @default(uuid())
+  deviceId  String
+  message   String
+  status    String   @default("PENDING") // PENDING, RESOLVED
+  createdAt DateTime @default(now())
+}
+
 model AuditLog {
   id             String   @id @default(uuid())
   adminName      String   @default("Hans")
