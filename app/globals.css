@@ -51,10 +51,21 @@
   -webkit-tap-highlight-color: transparent !important;
 }
 
-/* Blokir seleksi teks & drag gambar */
+/* Izinkan seleksi teks HANYA pada input/textarea agar user tetap bisa mengetik */
+input, textarea {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
 img, a {
   pointer-events: none !important;
   -webkit-user-drag: none !important;
+}
+
+/* ══════════ DYNAMIC ISLAND SCROLLING ══════════ */
+.nav-scroll {
+  touch-action: pan-x; /* Izinkan swipe horizontal, cegah konflik vertikal */
+  -webkit-overflow-scrolling: touch; /* Smooth scroll di iOS */
 }
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
