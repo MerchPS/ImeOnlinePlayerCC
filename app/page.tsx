@@ -631,7 +631,7 @@ function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: 
         <header className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-subtle">IME Roleplay</div>
-            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Player Monitor</h1>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Player Monitors</h1>
             <p className="mt-1 text-sm text-muted">Pantau siapa saja yang sedang bermain sekarang</p>
           </div>
 
