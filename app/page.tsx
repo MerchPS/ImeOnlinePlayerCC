@@ -9,39 +9,9 @@ type ApiData = { ok: boolean; gate: string; online: number; max: number; players
 type AuthStatus = 'LOADING' | 'UNAUTHORIZED' | 'PENDING' | 'APPROVED' | 'ADMIN' | 'BANNED' | 'TIMEOUT';
 type AccessRequest = { id: string; ipAddress: string; deviceId: string; status: string; timeoutUntil: string | null; reason: string | null; lastActive: string; createdAt: string; };
 type AuditLog = { id: string; adminName: string; action: string; targetDeviceId: string; details: string; createdAt: string; };
+type FactionDef = { id: string; label: string; short: string; matchType: string; badge: string; dot: string; };
 
-/* ══════════════ Faction System ══════════════ */
-type FactionDef = { id: string; short: string; label: string; badge: string; dot: string; match: (p: string) => boolean; };
-const FACTIONS: FactionDef[] = [
-  { id: 'CC',      short: 'CC',       label: 'Crimson Creed',             badge: 'bg-[#3a1f1a] text-[#e09b7a] border-[#5a2f25]', dot: 'bg-[#c97a5c]', match: p => p.includes('CC') },
-  { id: 'LSPD',    short: 'LSPD',     label: 'Polisi Kota',                badge: 'bg-[#1a2535] text-[#82aed8] border-[#253a55]', dot: 'bg-[#6a9dd8]', match: p => p.includes('LSPD') },
-  { id: '4B',      short: '4B',       label: '4Bloods',                    badge: 'bg-[#2f1a1a] text-[#d47878] border-[#4a2525]', dot: 'bg-[#c95c5c]', match: p => p.includes('4B') },
-  { id: 'DOC',     short: 'DOC',      label: 'Department Of Correction',   badge: 'bg-[#252525] text-[#b0b0b0] border-[#3a3a3a]', dot: 'bg-[#a0a0a0]', match: p => p.includes('DOC') },
-  { id: 'LSSD',    short: 'LSSD',     label: 'Serif',                      badge: 'bg-[#2f2a1a] text-[#dcc878] border-[#4a4525]', dot: 'bg-[#c9b05c]', match: p => p.includes('LSSD') },
-  { id: 'MEDIC',   short: 'MED',      label: 'Dokter Kota',                badge: 'bg-[#25302a] text-[#9dd88c] border-[#3a4a35]', dot: 'bg-[#8cc97a]', match: p => p.includes('MEDIC') },
-  { id: 'RH',      short: 'RH',       label: 'Roxwood Hospital',           badge: 'bg-[#1a2f2a] text-[#7ad8b0] border-[#254a3f]', dot: 'bg-[#6ac9a0]', match: p => p.includes('RH') },
-  { id: 'ICR',     short: 'ICR',      label: 'Mekanik IME',                badge: 'bg-[#3a2f1a] text-[#dcc878] border-[#5a4a25]', dot: 'bg-[#c9a95c]', match: p => p.includes('ICR') },
-  { id: 'DOJ',     short: 'DOJ',      label: 'Department Of Justice',      badge: 'bg-[#2a1f35] text-[#b48fd8] border-[#3f2f55]', dot: 'bg-[#a07ac9]', match: p => p.includes('DOJ') },
-  { id: 'JRZ',     short: 'JRZ',      label: 'Jeruzalem',                  badge: 'bg-[#3a351a] text-[#dcd478] border-[#5a5525]', dot: 'bg-[#c9c05c]', match: p => p.includes('JRZ') },
-  { id: 'HT',      short: 'HT',       label: 'HighTable',                  badge: 'bg-[#2a2515] text-[#e0b88a] border-[#453f25]', dot: 'bg-[#d4a574]', match: p => p.includes('HT') },
-  { id: 'IME',     short: 'IME',      label: 'Helper',                     badge: 'bg-[#1a2f35] text-[#7ad8e0] border-[#254a55]', dot: 'bg-[#6ac9d8]', match: p => p.includes('#IME') },
-  { id: 'BURGENK', short: 'Burgenk',  label: 'Burgenk',                    badge: 'bg-[#2a1a25] text-[#d882b0] border-[#4a2540]', dot: 'bg-[#c95c90]', match: p => p.includes('BURGENK') },
-  { id: 'DTF',     short: 'DTF',      label: 'DTF',                        badge: 'bg-[#1a2525] text-[#82d8d8] border-[#254a4a]', dot: 'bg-[#6ac9c9]', match: p => p.includes('DTF') },
-  { id: 'ALLSTAR', short: 'Allstars', label: 'Allstars',                   badge: 'bg-[#25251a] text-[#d8d882] border-[#4a4a25]', dot: 'bg-[#c9c95c]', match: p => p.includes('ALLSTAR') },
-  { id: 'NSN',     short: 'NSN',      label: 'NSN',                        badge: 'bg-[#351a2a] text-[#d882b0] border-[#552540]', dot: 'bg-[#c95c90]', match: p => p.includes('NSN') },
-  { id: 'WT',      short: 'WT',       label: 'WT',                         badge: 'bg-[#1a3525] text-[#82d8a0] border-[#254a35]', dot: 'bg-[#6ac980]', match: p => p.startsWith('WT') },
-  { id: '24S',     short: '24S',      label: '24S',                        badge: 'bg-[#2a1a1a] text-[#d88282] border-[#4a2525]', dot: 'bg-[#c95c5c]', match: p => p.includes('24S') },
-  { id: 'OMC',     short: 'OMC',      label: 'OMC',                        badge: 'bg-[#1a2a35] text-[#82b0d8] border-[#254055]', dot: 'bg-[#5c90c9]', match: p => p.includes('OMC') },
-  { id: '5TAR',    short: '5TAR',     label: '5TAR',                       badge: 'bg-[#352a1a] text-[#d8b082] border-[#554025]', dot: 'bg-[#c9905c]', match: p => p.includes('5TAR') },
-  { id: 'MX',      short: 'MX',       label: 'MX',                         badge: 'bg-[#2a1a35] text-[#b082d8] border-[#402555]', dot: 'bg-[#905cc9]', match: p => p.startsWith('MX') },
-  { id: 'RCMC',    short: 'RCMC',     label: 'RCMC',                       badge: 'bg-[#35251a] text-[#d8a082] border-[#553a25]', dot: 'bg-[#c9805c]', match: p => p.includes('RCMC') || p.includes('RC1') },
-  { id: 'RAGE',    short: 'RAGE',     label: 'RAGE',                       badge: 'bg-[#351a1a] text-[#d88282] border-[#552525]', dot: 'bg-[#c95c5c]', match: p => p.startsWith('RAGE') },
-  { id: 'ALTION',  short: 'Altion',   label: 'Altion',                     badge: 'bg-[#1a352a] text-[#82d8b0] border-[#254a40]', dot: 'bg-[#5cc990]', match: p => p.includes('ALTION') },
-  { id: 'NN',      short: 'NN',       label: 'NN',                         badge: 'bg-[#251a35] text-[#a082d8] border-[#352555]', dot: 'bg-[#805cc9]', match: p => p.startsWith('NN') }
-];
-const WARGA: FactionDef = { id: 'WARGA', short: 'Untagged', label: 'Untagged', badge: 'bg-hover text-muted border-line', dot: 'bg-muted', match: () => true };
-function detectFaction(name: string): string { const prefix = name.split(' - ')[0].toUpperCase().trim(); for (const f of FACTIONS) if (f.match(prefix)) return f.id; return 'WARGA'; }
-function factionOf(id: string): FactionDef { return FACTIONS.find(f => f.id === id) ?? WARGA; }
+const WARGA: FactionDef = { id: 'WARGA', short: 'Untagged', label: 'Untagged', matchType: 'NONE', badge: 'bg-hover text-muted border-line', dot: 'bg-muted' };
 
 /* ══════════════ Utils ══════════════ */
 const PAGE_SIZE = 25;
@@ -49,6 +19,15 @@ const fmt = (n: number) => n.toLocaleString('id-ID');
 function pingClass(p: number) { if (p < 80) return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'; if (p < 150) return 'bg-amber-500/10 text-amber-500 border-amber-500/20'; return 'bg-red-500/10 text-red-500 border-red-500/20'; }
 function formatTime(ms: number) { const totalSecs = Math.floor(ms / 1000); const h = Math.floor(totalSecs / 3600); const m = Math.floor((totalSecs % 3600) / 60); const s = totalSecs % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
 function formatDate(iso: string) { return new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }); }
+
+function detectFaction(name: string, factions: FactionDef[]): string {
+  const prefix = name.split(' - ')[0].toUpperCase().trim();
+  for (const f of factions) {
+    if (f.matchType === 'STARTS_WITH' && prefix.startsWith(f.short.toUpperCase())) return f.id;
+    if (f.matchType === 'INCLUDES' && prefix.includes(f.short.toUpperCase())) return f.id;
+  }
+  return 'WARGA';
+}
 
 function renderMarkdown(text: string) {
   const cleanText = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
@@ -114,13 +93,22 @@ export default function App() {
   );
 }
 
-/* ══════════════ Lock Screen ══════════════ */
+/* ══════════════ Lock Screen (Rate Limiter Handled) ══════════════ */
 function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, status: string, meta: any, onRefresh: () => void }) {
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  
   const requestAccess = async () => {
     setLoading(true);
-    await fetch('/api/auth/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId }) });
-    setLoading(false); onRefresh();
+    setErrorMsg('');
+    const res = await fetch('/api/auth/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId }) });
+    if (res.status === 429) {
+      const data = await res.json();
+      setErrorMsg(data.error); // Menampilkan "Tunggu X detik..."
+    } else {
+      onRefresh();
+    }
+    setLoading(false); 
   };
 
   return (
@@ -139,11 +127,10 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, s
         <p className="mt-2 text-sm text-muted">
           {status === 'BANNED' ? 'Kamu telah melanggar aturan dan dilarang mengakses web ini.' :
            status === 'TIMEOUT' ? 'Akses kamu ditangguhkan sementara.' :
-           status === 'PENDING' ? '⏳ Menunggu Hans (Admin) menyetujui permintaan akses kamu. Halaman ini akan terbuka otomatis jika sudah di-approve.' :
+           status === 'PENDING' ? '⏳ Menunggu Hans (Admin) menyetujui permintaan akses kamu.' :
            'Website ini bersifat privat. Kamu harus meminta izin akses dari Admin Hans terlebih dahulu.'}
         </p>
 
-        {/* Tampilkan Alasan dan Waktu */}
         {(status === 'BANNED' || status === 'TIMEOUT') && (
           <div className="mt-4 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-left">
             <div className="text-xs font-semibold uppercase text-red-400">Alasan:</div>
@@ -158,9 +145,11 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, s
           </div>
         )}
 
+        {errorMsg && <div className="mt-4 text-xs font-semibold text-orange-500">{errorMsg}</div>}
+
         {status === 'UNAUTHORIZED' && (
           <button onClick={requestAccess} disabled={loading} className="mt-6 w-full rounded-xl bg-accent py-3 text-sm font-bold text-accent-text transition hover:bg-accent-hover disabled:opacity-50">
-            {loading ? 'Mengirim permintaan...' : 'Minta Akses Sekarang'}
+            {loading ? 'Memproses...' : 'Minta Akses Sekarang'}
           </button>
         )}
 
@@ -170,29 +159,36 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, s
   );
 }
 
-/* ══════════════ Admin Panel (Full-Screen) ══════════════ */
+/* ══════════════ Admin Panel (Factions & Requests) ══════════════ */
 function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
-  const [activeTab, setActiveTab] = useState<'requests' | 'audit'>('requests');
+  const [activeTab, setActiveTab] = useState<'requests' | 'factions' | 'audit'>('requests');
+  
+  // Requests State
   const [requests, setRequests] = useState<AccessRequest[]>([]);
-  const [logs, setLogs] = useState<AuditLog[]>([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('ALL');
-  
-  // Bulk Selection
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  
-  // Custom Action Modal
   const [actionModal, setActionModal] = useState<{ type: 'BAN' | 'TIMEOUT', id?: string } | null>(null);
   const [reasonInput, setReasonInput] = useState('');
-  const [durationInput, setDurationInput] = useState('60'); // default 1 jam
+  const [durationInput, setDurationInput] = useState('60');
+
+  // Factions State
+  const [factions, setFactions] = useState<FactionDef[]>([]);
+  const [newFaction, setNewFaction] = useState({ label: '', short: '', matchType: 'INCLUDES', badge: 'bg-gray-500/10 text-gray-500 border-gray-500/20', dot: 'bg-gray-500' });
+
+  // Audit State
+  const [logs, setLogs] = useState<AuditLog[]>([]);
 
   const fetchData = useCallback(async () => {
     if (activeTab === 'requests') {
       const res = await fetch('/api/admin/requests');
       if (res.ok) setRequests(await res.json());
-    } else {
+    } else if (activeTab === 'audit') {
       const res = await fetch('/api/admin/audit');
       if (res.ok) setLogs(await res.json());
+    } else if (activeTab === 'factions') {
+      const res = await fetch('/api/factions');
+      if (res.ok) setFactions(await res.json());
     }
   }, [activeTab]);
 
@@ -205,26 +201,27 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
   }, [open, fetchData]);
 
   const executeAction = async (id: string, action: string, reason?: string, durationMinutes?: number) => {
-    await fetch('/api/admin/requests', { 
-      method: 'PATCH', 
-      headers: { 'Content-Type': 'application/json' }, 
-      body: JSON.stringify({ id, action, reason, durationMinutes }) 
-    });
-    fetchData();
-    setActionModal(null);
-    setReasonInput('');
+    await fetch('/api/admin/requests', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action, reason, durationMinutes }) });
+    fetchData(); setActionModal(null); setReasonInput('');
   };
 
   const executeBulk = async (action: string) => {
     if (selected.size === 0) return;
     if (action === 'BAN' && !confirm(`Yakin ingin mem-ban ${selected.size} user sekaligus?`)) return;
-    
-    await fetch('/api/admin/requests', { 
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json' }, 
-      body: JSON.stringify({ ids: Array.from(selected), action }) 
-    });
-    setSelected(new Set());
+    await fetch('/api/admin/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: Array.from(selected), action }) });
+    setSelected(new Set()); fetchData();
+  };
+
+  const addFaction = async () => {
+    if (!newFaction.label || !newFaction.short) return;
+    await fetch('/api/factions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newFaction) });
+    setNewFaction({ label: '', short: '', matchType: 'INCLUDES', badge: 'bg-gray-500/10 text-gray-500 border-gray-500/20', dot: 'bg-gray-500' });
+    fetchData();
+  };
+
+  const deleteFaction = async (id: string) => {
+    if (!confirm('Hapus faction ini?')) return;
+    await fetch(`/api/factions?id=${id}`, { method: 'DELETE' });
     fetchData();
   };
 
@@ -232,11 +229,6 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
     const next = new Set(selected);
     if (next.has(id)) next.delete(id); else next.add(id);
     setSelected(next);
-  };
-
-  const toggleAll = () => {
-    if (selected.size === filtered.length) setSelected(new Set());
-    else setSelected(new Set(filtered.map(r => r.id)));
   };
 
   const filtered = requests.filter(r => {
@@ -257,13 +249,13 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
             </span>
             Admin Center
           </h1>
-          <p className="text-xs text-muted mt-1 sm:text-sm">Selamat datang, Hans.</p>
         </div>
         
         <div className="mt-4 flex items-center gap-2 sm:mt-0">
           <div className="flex rounded-lg border border-line bg-app p-1">
-            <button onClick={() => setActiveTab('requests')} className={`rounded-md px-4 py-1.5 text-xs font-medium transition ${activeTab === 'requests' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Requests</button>
-            <button onClick={() => setActiveTab('audit')} className={`rounded-md px-4 py-1.5 text-xs font-medium transition ${activeTab === 'audit' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Audit Log</button>
+            <button onClick={() => setActiveTab('requests')} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${activeTab === 'requests' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Users</button>
+            <button onClick={() => setActiveTab('factions')} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${activeTab === 'factions' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Factions</button>
+            <button onClick={() => setActiveTab('audit')} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${activeTab === 'audit' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Logs</button>
           </div>
           <button onClick={onClose} className="rounded-lg bg-hover px-4 py-2 text-sm font-medium hover:bg-line transition">Tutup</button>
         </div>
@@ -274,30 +266,24 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
           
           {activeTab === 'requests' && (
             <>
-              {/* Toolbar & Bulk Actions */}
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
                   {['ALL', 'PENDING', 'APPROVED', 'BANNED'].map(f => (
                     <button key={f} onClick={() => setFilter(f)} className={`rounded-lg px-4 py-2 text-xs font-medium transition sm:text-sm ${filter === f ? 'bg-accent text-accent-text' : 'bg-card border border-line text-muted hover:text-main'}`}>{f}</button>
                   ))}
                   <div className="h-6 w-px bg-line mx-1" />
-                  <button onClick={() => executeBulk('APPROVE')} disabled={selected.size === 0} className="rounded-lg bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-500 hover:bg-emerald-500/20 disabled:opacity-30">Approve Selected ({selected.size})</button>
+                  <button onClick={() => executeBulk('APPROVE')} disabled={selected.size === 0} className="rounded-lg bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-500 hover:bg-emerald-500/20 disabled:opacity-30">ACC Selected ({selected.size})</button>
                   <button onClick={() => executeBulk('BAN')} disabled={selected.size === 0} className="rounded-lg bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-500 hover:bg-red-500/20 disabled:opacity-30">Ban Selected ({selected.size})</button>
                 </div>
-                <div className="relative w-full sm:w-64">
-                  <input type="text" placeholder="Cari IP atau Device ID..." value={search} onChange={e => setSearch(e.target.value)} className="w-full rounded-lg border border-line bg-card px-4 py-2 text-sm text-main outline-none focus:border-accent" />
-                </div>
+                <input type="text" placeholder="Cari IP / Device ID..." value={search} onChange={e => setSearch(e.target.value)} className="w-full rounded-lg border border-line bg-card px-4 py-2 text-sm outline-none focus:border-accent sm:w-64" />
               </div>
 
-              {/* Table */}
               <div className="rounded-xl border border-line bg-card overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm text-left whitespace-nowrap">
                     <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
                       <tr>
-                        <th className="px-4 py-3 w-10">
-                          <input type="checkbox" checked={selected.size > 0 && selected.size === filtered.length} onChange={toggleAll} className="cursor-pointer accent-accent" />
-                        </th>
+                        <th className="px-4 py-3 w-10"><input type="checkbox" checked={selected.size > 0 && selected.size === filtered.length} onChange={(e) => e.target.checked ? setSelected(new Set(filtered.map(r => r.id))) : setSelected(new Set())} className="cursor-pointer accent-accent" /></th>
                         <th className="px-4 py-3">Status</th>
                         <th className="px-4 py-3">User Info</th>
                         <th className="px-4 py-3">Aksi</th>
@@ -309,33 +295,27 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
                         const isTimeout = r.timeoutUntil && new Date(r.timeoutUntil) > new Date();
                         return (
                           <tr key={r.id} className="border-t border-line hover:bg-hover/50 transition">
-                            <td className="px-4 py-4">
-                              <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSelect(r.id)} className="cursor-pointer accent-accent" />
-                            </td>
+                            <td className="px-4 py-4"><input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSelect(r.id)} className="cursor-pointer accent-accent" /></td>
                             <td className="px-4 py-4">
                               <div className="flex items-center gap-2">
-                                <span className={`h-2.5 w-2.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-line'}`} title={isOnline ? 'Online' : 'Offline'} />
+                                <span className={`h-2.5 w-2.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-line'}`} />
                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${r.status === 'APPROVED' ? 'bg-emerald-500/20 text-emerald-500' : r.status === 'PENDING' ? 'bg-amber-500/20 text-amber-500' : r.status === 'BANNED' ? 'bg-red-500/20 text-red-500' : 'bg-gray-500/20 text-gray-500'}`}>{r.status}</span>
-                                {isTimeout && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-500">TIMEOUT</span>}
+                                {isTimeout && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-500">TO</span>}
                               </div>
                               {r.reason && <div className="mt-1 text-[10px] text-muted max-w-[120px] truncate" title={r.reason}>Ket: {r.reason}</div>}
                             </td>
                             <td className="px-4 py-4">
                               <div className="font-medium text-main">{r.ipAddress}</div>
                               <div className="font-mono text-[11px] text-subtle mt-0.5">{r.deviceId}</div>
-                              <div className="text-[10px] text-muted mt-0.5">Active: {formatDate(r.lastActive)}</div>
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex flex-wrap items-center gap-1.5">
-                                {r.status === 'BANNED' ? (
-                                  <button onClick={() => executeAction(r.id, 'REVOKE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-2 py-1 rounded text-[11px] font-medium">Unban</button>
-                                ) : isTimeout ? (
-                                  <button onClick={() => executeAction(r.id, 'CLEAR_TIMEOUT')} className="bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 px-2 py-1 rounded text-[11px] font-medium">Hapus TO</button>
-                                ) : (
+                                {r.status === 'BANNED' ? <button onClick={() => executeAction(r.id, 'REVOKE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-2 py-1 rounded text-[11px] font-medium">Unban</button>
+                                : isTimeout ? <button onClick={() => executeAction(r.id, 'CLEAR_TIMEOUT')} className="bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 px-2 py-1 rounded text-[11px] font-medium">Hapus TO</button>
+                                : (
                                   <>
                                     {r.status !== 'APPROVED' && <button onClick={() => executeAction(r.id, 'APPROVE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-2 py-1 rounded text-[11px] font-medium">ACC</button>}
                                     {r.status === 'APPROVED' && <button onClick={() => executeAction(r.id, 'REVOKE')} className="bg-hover text-muted hover:text-main px-2 py-1 rounded text-[11px] font-medium">Revoke</button>}
-                                    
                                     <button onClick={() => { setActionModal({ type: 'TIMEOUT', id: r.id }); setReasonInput(''); setDurationInput('60'); }} className="text-orange-500 hover:bg-orange-500/10 px-2 py-1 rounded text-[11px] font-medium border border-transparent">Timeout</button>
                                     <button onClick={() => { setActionModal({ type: 'BAN', id: r.id }); setReasonInput(''); }} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-[11px] font-medium border border-transparent">Ban</button>
                                   </>
@@ -350,6 +330,71 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
                 </div>
               </div>
             </>
+          )}
+
+          {activeTab === 'factions' && (
+            <div className="space-y-6">
+              <div className="rounded-xl border border-line bg-card p-5">
+                <h3 className="text-sm font-bold mb-4">Tambah Faction Baru</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted mb-1 block">Label (Nama Lengkap)</label>
+                    <input type="text" value={newFaction.label} onChange={e => setNewFaction({...newFaction, label: e.target.value})} placeholder="FBI" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted mb-1 block">Short (Prefix in-game)</label>
+                    <input type="text" value={newFaction.short} onChange={e => setNewFaction({...newFaction, short: e.target.value.toUpperCase()})} placeholder="FBI" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted mb-1 block">Match Type</label>
+                    <select value={newFaction.matchType} onChange={e => setNewFaction({...newFaction, matchType: e.target.value})} className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent">
+                      <option value="INCLUDES">INCLUDES (Mengandung)</option>
+                      <option value="STARTS_WITH">STARTS_WITH (Diawali)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted mb-1 block">Badge Tailwind</label>
+                    <input type="text" value={newFaction.badge} onChange={e => setNewFaction({...newFaction, badge: e.target.value})} placeholder="bg-blue-500/10 text-blue-500 border-blue-500/20" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted mb-1 block">Dot Tailwind</label>
+                    <input type="text" value={newFaction.dot} onChange={e => setNewFaction({...newFaction, dot: e.target.value})} placeholder="bg-blue-500" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
+                  </div>
+                  <div className="flex items-end">
+                    <button onClick={addFaction} className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover transition">Tambah Faction</button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-line bg-card overflow-hidden">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
+                    <tr>
+                      <th className="px-4 py-3">Label</th>
+                      <th className="px-4 py-3">Short</th>
+                      <th className="px-4 py-3">Match Type</th>
+                      <th className="px-4 py-3">Preview</th>
+                      <th className="px-4 py-3 text-right">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {factions.map(f => (
+                      <tr key={f.id} className="border-t border-line hover:bg-hover/50 transition">
+                        <td className="px-4 py-3 font-medium text-main">{f.label}</td>
+                        <td className="px-4 py-3 font-mono text-muted">{f.short}</td>
+                        <td className="px-4 py-3 text-xs text-subtle">{f.matchType}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center rounded border px-2 py-0.5 font-mono text-[10px] font-semibold ${f.badge}`}>{f.short}</span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button onClick={() => deleteFaction(f.id)} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-xs font-medium transition">Hapus</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
 
           {activeTab === 'audit' && (
@@ -375,7 +420,6 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
                         <td className="px-4 py-3 text-muted text-xs">{l.details || '-'}</td>
                       </tr>
                     ))}
-                    {logs.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-subtle">Belum ada log aktivitas.</td></tr>}
                   </tbody>
                 </table>
               </div>
@@ -391,9 +435,8 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
             <h3 className="text-lg font-bold text-main mb-4">
               {actionModal.type === 'BAN' ? 'Blokir Permanen (Ban)' : 'Beri Jeda (Timeout)'}
             </h3>
-            
             <label className="text-xs font-semibold text-muted mb-1 block">Alasan</label>
-            <input type="text" value={reasonInput} onChange={e => setReasonInput(e.target.value)} placeholder="Contoh: Spam request, nakal, dll." className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent mb-3" />
+            <input type="text" value={reasonInput} onChange={e => setReasonInput(e.target.value)} placeholder="Contoh: Spam request..." className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent mb-3" />
             
             {actionModal.type === 'TIMEOUT' && (
               <>
@@ -409,9 +452,7 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
 
             <div className="flex justify-end gap-2 mt-2">
               <button onClick={() => setActionModal(null)} className="rounded-lg px-4 py-2 text-sm font-medium text-muted hover:text-main">Batal</button>
-              <button onClick={() => executeAction(actionModal.id!, actionModal.type, reasonInput, Number(durationInput))} className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${actionModal.type === 'BAN' ? 'bg-red-500 hover:bg-red-600' : 'bg-orange-500 hover:bg-orange-600'}`}>
-                Konfirmasi
-              </button>
+              <button onClick={() => executeAction(actionModal.id!, actionModal.type, reasonInput, Number(durationInput))} className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${actionModal.type === 'BAN' ? 'bg-red-500 hover:bg-red-600' : 'bg-orange-500 hover:bg-orange-600'}`}>Konfirmasi</button>
             </div>
           </div>
         </div>
@@ -433,10 +474,16 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
   const [aiOpen, setAiOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   
+  const [factions, setFactions] = useState<FactionDef[]>([]);
   const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
   const [refreshMs, setRefreshMs] = useState(60000);
   const [compactMode, setCompactMode] = useState(false);
   const [countdown, setCountdown] = useState<{ diffMs: number, target: Date } | null>(null);
+
+  // Fetch Factions
+  useEffect(() => {
+    fetch('/api/factions').then(res => res.json()).then(setFactions);
+  }, []);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('ime-theme') as any;
@@ -511,13 +558,13 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
     return () => clearInterval(id);
   }, [load, refreshMs]);
 
-  const enriched = useMemo(() => (data?.players ?? []).map(p => ({ ...p, faction: detectFaction(p.name) })), [data]);
+  const enriched = useMemo(() => (data?.players ?? []).map(p => ({ ...p, faction: detectFaction(p.name, factions) })), [data, factions]);
   const counts = useMemo(() => {
     const c: Record<string, number> = { SEMUA: enriched.length };
-    for (const f of [...FACTIONS, WARGA]) c[f.id] = 0;
+    for (const f of [...factions, WARGA]) c[f.id] = 0;
     for (const p of enriched) c[p.faction] = (c[p.faction] ?? 0) + 1;
     return c;
-  }, [enriched]);
+  }, [enriched, factions]);
 
   const filtered = useMemo(() => {
     let list = enriched;
@@ -537,17 +584,16 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
   const navCats = useMemo(() => {
     const items = [
       { id: 'SEMUA', short: 'Semua', dot: 'bg-accent' },
-      ...FACTIONS.map(f => ({ id: f.id, short: f.short, dot: f.dot })),
+      ...factions.map(f => ({ id: f.id, short: f.short, dot: f.dot })),
       { id: 'WARGA', short: WARGA.short, dot: WARGA.dot }
     ];
     return items.filter(it => (counts[it.id] ?? 0) > 0 || it.id === activeCat);
-  }, [counts, activeCat]);
+  }, [counts, activeCat, factions]);
 
   const isWarning = countdown && countdown.diffMs < 30 * 60 * 1000;
 
   return (
     <main className="min-h-screen bg-app text-main">
-      {/* ── Floating pill nav ── */}
       <div className="fixed top-3 left-0 right-0 z-40 flex justify-center px-3">
         <div className="relative w-full max-w-fit">
           <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-8 bg-gradient-to-r from-app to-transparent rounded-l-full" />
@@ -595,9 +641,7 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
                 <span className="text-xs font-semibold">Admin</span>
                 {pendingCount > 0 && (
-                  <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white border-2 border-app">
-                    {pendingCount}
-                  </span>
+                  <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white border-2 border-app">{pendingCount}</span>
                 )}
               </button>
             )}
@@ -655,7 +699,7 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
                 ) : slice.length === 0 ? (
                   <tr><td colSpan={3} className="px-4 py-16 text-center text-subtle">{filtered.length ? 'Tidak ada hasil.' : 'Tidak ada player di kategori ini.'}</td></tr>
                 ) : slice.map(p => {
-                  const fac = factionOf(p.faction);
+                  const fac = p.faction === 'WARGA' ? WARGA : factions.find(f => f.id === p.faction) ?? WARGA;
                   return (
                     <tr key={p.id} className={`border-b border-line transition hover:bg-hover ${compactMode ? 'h-10' : 'h-14'}`}>
                       <td className="px-4"><span className="inline-flex items-center rounded-md border border-line bg-app px-2 py-0.5 font-mono text-[11px] font-medium text-main">#{p.id}</span></td>
@@ -684,7 +728,7 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
         </div>
       </div>
 
-      <AIDrawer open={aiOpen} onClose={() => setAiOpen(false)} data={data} enriched={enriched} counts={counts} activeCat={activeCat} />
+      <AIDrawer open={aiOpen} onClose={() => setAiOpen(false)} data={data} enriched={enriched} counts={counts} activeCat={activeCat} factions={factions} />
     </main>
   );
 }
@@ -765,7 +809,7 @@ function SettingsModal({ open, onClose }: { open: boolean, onClose: () => void }
 }
 
 /* ══════════════ AI Drawer ══════════════ */
-function AIDrawer({ open, onClose, data, enriched, counts, activeCat }: any) {
+function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factions }: any) {
   const [msgs, setMsgs] = useState<AiMsg[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -778,10 +822,11 @@ function AIDrawer({ open, onClose, data, enriched, counts, activeCat }: any) {
     const factionSummary: any = {};
     for (const [id, count] of Object.entries(counts)) {
       if (id === 'SEMUA' || !count) continue;
-      factionSummary[id] = { label: factionOf(id).label, count };
+      const f = id === 'WARGA' ? WARGA : factions.find((x: any) => x.id === id);
+      factionSummary[id] = { label: f?.label || 'Unknown', count };
     }
-    return { totalOnline: data.online, maxSlots: data.max, gate: data.gate, updatedAt: data.updatedAt, currentFilter: activeCat, factions: factionSummary, players: enriched.slice(0, 150).map((p: any) => ({ kantong: p.id, nama: p.name, faction: factionOf(p.faction).label, ping: p.ping })) };
-  }, [data, counts, activeCat, enriched]);
+    return { totalOnline: data.online, maxSlots: data.max, gate: data.gate, updatedAt: data.updatedAt, currentFilter: activeCat, factions: factionSummary, players: enriched.slice(0, 150).map((p: any) => ({ kantong: p.id, nama: p.name, faction: (p.faction === 'WARGA' ? WARGA : factions.find((x:any) => x.id === p.faction))?.label || 'Untagged', ping: p.ping })) };
+  }, [data, counts, activeCat, enriched, factions]);
 
   async function send(text: string) {
     const trimmed = text.trim();
