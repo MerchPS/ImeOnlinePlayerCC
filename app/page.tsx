@@ -20,24 +20,30 @@ function pingClass(p: number) { if (p < 80) return 'bg-emerald-500/10 text-emera
 function formatTime(ms: number) { const totalSecs = Math.floor(ms / 1000); const h = Math.floor(totalSecs / 3600); const m = Math.floor((totalSecs % 3600) / 60); const s = totalSecs % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
 function formatDate(iso: string) { return new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }); }
 
-// PERBAIKAN: Mengurutkan faction dari yang terpanjang agar MEDIC tidak tertukar dengan CC
+// PERBAIKAN: Mendukung Multiple Aliases (RCMC,RC1) & Mengurutkan dari yang terpanjang (HTH sebelum HT)
 function detectFaction(name: string, factions: FactionDef[]): string {
   const prefix = name.split(' - ')[0].trim();
   const cleanPrefix = prefix.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   const cleanFullName = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
+  // Urutkan dari yang paling panjang (HTH akan diproses sebelum HT)
   const sortedFactions = [...factions].sort((a, b) => b.short.length - a.short.length);
 
   for (const f of sortedFactions) {
-    const cleanShort = f.short.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-    if (!cleanShort) continue;
-
-    if (f.matchType === 'STARTS_WITH' && cleanPrefix.startsWith(cleanShort)) return f.id;
-    if (f.matchType === 'INCLUDES' && cleanPrefix.includes(cleanShort)) return f.id;
+    // Pisahkan alias berdasarkan koma (misal: "RCMC,RC1")
+    const aliases = f.short.split(',').map(s => s.replace(/[^a-zA-Z0-9]/g, '').toUpperCase());
     
-    if (!name.includes(' - ')) {
-      if (f.matchType === 'STARTS_WITH' && cleanFullName.startsWith(cleanShort)) return f.id;
-      if (f.matchType === 'INCLUDES' && cleanFullName.includes(cleanShort)) return f.id;
+    for (const alias of aliases) {
+      if (!alias) continue;
+
+      if (f.matchType === 'STARTS_WITH') {
+        if (cleanPrefix.startsWith(alias)) return f.id;
+        if (!name.includes(' - ') && cleanFullName.startsWith(alias)) return f.id;
+      }
+      if (f.matchType === 'INCLUDES') {
+        if (cleanPrefix.includes(alias)) return f.id;
+        if (!name.includes(' - ') && cleanFullName.includes(alias)) return f.id;
+      }
     }
   }
   return 'WARGA';
@@ -65,12 +71,11 @@ export default function App() {
   // Anti-Screenshot State
   const [isBlurred, setIsBlurred] = useState(false);
 
-  // Theme & Settings State (Lifted to App)
+  // Theme & Settings State
   const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
   const [refreshMs, setRefreshMs] = useState(60000);
   const [compactMode, setCompactMode] = useState(false);
 
-  // Initialize Device ID and Settings
   useEffect(() => {
     let id = localStorage.getItem('ime-device-id');
     if (!id) { id = crypto.randomUUID(); localStorage.setItem('ime-device-id', id); }
@@ -84,13 +89,11 @@ export default function App() {
     if (savedCompact) setCompactMode(savedCompact === 'true');
   }, []);
 
-  // Apply Theme instantly
   useEffect(() => {
     localStorage.setItem('ime-theme', theme);
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  // Save Settings without Reload
   const handleSaveSettings = (newTheme: any, newRefresh: number, newCompact: boolean) => {
     setTheme(newTheme);
     setRefreshMs(newRefresh);
@@ -100,7 +103,6 @@ export default function App() {
     setSettingsOpen(false);
   };
 
-  // Check Auth
   useEffect(() => {
     if (!deviceId) return;
     const checkAuth = async () => {
@@ -116,27 +118,20 @@ export default function App() {
     return () => clearInterval(interval);
   }, [deviceId]);
 
-  // ══════════ ANTI-SCREENSHOT LOGIC (Tanpa Watermark) ══════════
+  // ══════════ ANTI-SCREENSHOT LOGIC ══════════
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) setIsBlurred(true);
-      else setTimeout(() => setIsBlurred(false), 300);
-    };
+    const handleVisibilityChange = () => { if (document.hidden) setIsBlurred(true); else setTimeout(() => setIsBlurred(false), 300); };
     const handleBlur = () => setIsBlurred(true);
     const handleFocus = () => setTimeout(() => setIsBlurred(false), 300);
     const handlePageHide = () => setIsBlurred(true);
-
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && ['p', 's', 'u'].includes(e.key.toLowerCase())) {
-        e.preventDefault();
-      }
+      if ((e.ctrlKey || e.metaKey) && ['p', 's', 'u'].includes(e.key.toLowerCase())) e.preventDefault();
       if (e.key === 'PrintScreen') {
         navigator.clipboard.writeText('⚠️ Screenshot dilarang!');
         setIsBlurred(true);
         setTimeout(() => setIsBlurred(false), 2000);
       }
     };
-
     const handleTouchStart = () => setIsBlurred(true);
     const handleTouchEnd = () => setTimeout(() => setIsBlurred(false), 800);
     const handleContextMenu = (e: MouseEvent) => e.preventDefault();
@@ -179,8 +174,6 @@ export default function App() {
 
   return (
     <div className="relative min-h-screen bg-app text-main overflow-hidden">
-      
-      {/* Konten Utama (Akan Terkena Blur saat Screenshot) */}
       <div className={`transition-all duration-300 ease-out ${isBlurred ? 'blur-[30px] scale-[0.95] opacity-10 pointer-events-none' : ''}`}>
         <Home 
           isAdmin={authStatus === 'ADMIN'} 
@@ -210,15 +203,10 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, s
   const [errorMsg, setErrorMsg] = useState('');
   
   const requestAccess = async () => {
-    setLoading(true);
-    setErrorMsg('');
+    setLoading(true); setErrorMsg('');
     const res = await fetch('/api/auth/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId }) });
-    if (res.status === 429) {
-      const data = await res.json();
-      setErrorMsg(data.error);
-    } else {
-      onRefresh();
-    }
+    if (res.status === 429) { const data = await res.json(); setErrorMsg(data.error); } 
+    else { onRefresh(); }
     setLoading(false); 
   };
 
@@ -246,24 +234,18 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, s
           <div className="mt-4 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-left">
             <div className="text-xs font-semibold uppercase text-red-400">Alasan:</div>
             <div className="mt-1 text-sm text-red-200">{meta?.reason || 'Tidak ada alasan spesifik.'}</div>
-            
             {status === 'TIMEOUT' && meta?.timeoutUntil && (
-              <div className="mt-3 text-xs text-red-300">
-                Dibuka kembali pada: <br/>
-                <span className="font-mono font-bold text-red-200">{new Date(meta.timeoutUntil).toLocaleString('id-ID')}</span>
-              </div>
+              <div className="mt-3 text-xs text-red-300">Dibuka kembali pada: <br/><span className="font-mono font-bold text-red-200">{new Date(meta.timeoutUntil).toLocaleString('id-ID')}</span></div>
             )}
           </div>
         )}
 
         {errorMsg && <div className="mt-4 text-xs font-semibold text-orange-500">{errorMsg}</div>}
-
         {status === 'UNAUTHORIZED' && (
           <button onClick={requestAccess} disabled={loading} className="mt-6 w-full rounded-xl bg-accent py-3 text-sm font-bold text-accent-text transition hover:bg-accent-hover disabled:opacity-50">
             {loading ? 'Memproses...' : 'Minta Akses Sekarang'}
           </button>
         )}
-
         <div className="mt-6 text-[10px] text-subtle font-mono bg-hover py-2 rounded-lg">Device ID: {deviceId}</div>
       </div>
     </div>
@@ -273,7 +255,6 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, s
 /* ══════════════ Admin Panel ══════════════ */
 function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
   const [activeTab, setActiveTab] = useState<'requests' | 'factions' | 'audit'>('requests');
-  
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('ALL');
@@ -281,30 +262,18 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
   const [actionModal, setActionModal] = useState<{ type: 'BAN' | 'TIMEOUT', id?: string } | null>(null);
   const [reasonInput, setReasonInput] = useState('');
   const [durationInput, setDurationInput] = useState('60');
-
   const [factions, setFactions] = useState<FactionDef[]>([]);
   const [newFaction, setNewFaction] = useState({ label: '', short: '', matchType: 'INCLUDES', badge: 'bg-gray-500/10 text-gray-500 border-gray-500/20', dot: 'bg-gray-500' });
   const [logs, setLogs] = useState<AuditLog[]>([]);
 
   const fetchData = useCallback(async () => {
-    if (activeTab === 'requests') {
-      const res = await fetch('/api/admin/requests');
-      if (res.ok) setRequests(await res.json());
-    } else if (activeTab === 'audit') {
-      const res = await fetch('/api/admin/audit');
-      if (res.ok) setLogs(await res.json());
-    } else if (activeTab === 'factions') {
-      const res = await fetch('/api/factions');
-      if (res.ok) setFactions(await res.json());
-    }
+    if (activeTab === 'requests') { const res = await fetch('/api/admin/requests'); if (res.ok) setRequests(await res.json()); } 
+    else if (activeTab === 'audit') { const res = await fetch('/api/admin/audit'); if (res.ok) setLogs(await res.json()); } 
+    else if (activeTab === 'factions') { const res = await fetch('/api/factions'); if (res.ok) setFactions(await res.json()); }
   }, [activeTab]);
 
   useEffect(() => { 
-    if (open) {
-      fetchData(); 
-      const int = setInterval(fetchData, 5000); 
-      return () => clearInterval(int);
-    } 
+    if (open) { fetchData(); const int = setInterval(fetchData, 5000); return () => clearInterval(int); } 
   }, [open, fetchData]);
 
   const executeAction = async (id: string, action: string, reason?: string, durationMinutes?: number) => {
@@ -328,8 +297,7 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
 
   const deleteFaction = async (id: string) => {
     if (!confirm('Hapus faction ini?')) return;
-    await fetch(`/api/factions?id=${id}`, { method: 'DELETE' });
-    fetchData();
+    await fetch(`/api/factions?id=${id}`, { method: 'DELETE' }); fetchData();
   };
 
   const toggleSelect = (id: string) => {
@@ -353,11 +321,9 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
           <h1 className="text-lg font-bold flex items-center gap-2 sm:text-xl">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-500">
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
-            </span>
-            Admin Center
+            </span>Admin Center
           </h1>
         </div>
-        
         <div className="mt-4 flex items-center gap-2 sm:mt-0">
           <div className="flex rounded-lg border border-line bg-app p-1">
             <button onClick={() => setActiveTab('requests')} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${activeTab === 'requests' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Users</button>
@@ -370,7 +336,6 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
 
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         <div className="mx-auto max-w-6xl space-y-6">
-          
           {activeTab === 'requests' && (
             <>
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -444,45 +409,23 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
               <div className="rounded-xl border border-line bg-card p-5">
                 <h3 className="text-sm font-bold mb-4">Tambah Faction Baru</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-[11px] font-semibold text-muted mb-1 block">Label (Nama Lengkap)</label>
-                    <input type="text" value={newFaction.label} onChange={e => setNewFaction({...newFaction, label: e.target.value})} placeholder="FBI" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-semibold text-muted mb-1 block">Short (Prefix in-game)</label>
-                    <input type="text" value={newFaction.short} onChange={e => setNewFaction({...newFaction, short: e.target.value.toUpperCase()})} placeholder="FBI" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
-                  </div>
+                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Label (Nama Lengkap)</label><input type="text" value={newFaction.label} onChange={e => setNewFaction({...newFaction, label: e.target.value})} placeholder="FBI" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Short (Prefix in-game)</label><input type="text" value={newFaction.short} onChange={e => setNewFaction({...newFaction, short: e.target.value.toUpperCase()})} placeholder="FBI" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
                   <div>
                     <label className="text-[11px] font-semibold text-muted mb-1 block">Match Type</label>
                     <select value={newFaction.matchType} onChange={e => setNewFaction({...newFaction, matchType: e.target.value})} className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent">
-                      <option value="INCLUDES">INCLUDES (Mengandung)</option>
-                      <option value="STARTS_WITH">STARTS_WITH (Diawali)</option>
+                      <option value="INCLUDES">INCLUDES (Mengandung)</option><option value="STARTS_WITH">STARTS_WITH (Diawali)</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="text-[11px] font-semibold text-muted mb-1 block">Badge Tailwind</label>
-                    <input type="text" value={newFaction.badge} onChange={e => setNewFaction({...newFaction, badge: e.target.value})} placeholder="bg-blue-500/10 text-blue-500 border-blue-500/20" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-semibold text-muted mb-1 block">Dot Tailwind</label>
-                    <input type="text" value={newFaction.dot} onChange={e => setNewFaction({...newFaction, dot: e.target.value})} placeholder="bg-blue-500" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
-                  </div>
-                  <div className="flex items-end">
-                    <button onClick={addFaction} className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover transition">Tambah Faction</button>
-                  </div>
+                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Badge Tailwind</label><input type="text" value={newFaction.badge} onChange={e => setNewFaction({...newFaction, badge: e.target.value})} placeholder="bg-blue-500/10 text-blue-500 border-blue-500/20" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Dot Tailwind</label><input type="text" value={newFaction.dot} onChange={e => setNewFaction({...newFaction, dot: e.target.value})} placeholder="bg-blue-500" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                  <div className="flex items-end"><button onClick={addFaction} className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover transition">Tambah Faction</button></div>
                 </div>
               </div>
-
               <div className="rounded-xl border border-line bg-card overflow-hidden">
                 <table className="w-full text-sm text-left">
                   <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
-                    <tr>
-                      <th className="px-4 py-3">Label</th>
-                      <th className="px-4 py-3">Short</th>
-                      <th className="px-4 py-3">Match Type</th>
-                      <th className="px-4 py-3">Preview</th>
-                      <th className="px-4 py-3 text-right">Aksi</th>
-                    </tr>
+                    <tr><th className="px-4 py-3">Label</th><th className="px-4 py-3">Short</th><th className="px-4 py-3">Match Type</th><th className="px-4 py-3">Preview</th><th className="px-4 py-3 text-right">Aksi</th></tr>
                   </thead>
                   <tbody>
                     {factions.map(f => (
@@ -491,11 +434,12 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
                         <td className="px-4 py-3 font-mono text-muted">{f.short}</td>
                         <td className="px-4 py-3 text-xs text-subtle">{f.matchType}</td>
                         <td className="px-4 py-3">
-                          <span className={`inline-flex items-center rounded border px-2 py-0.5 font-mono text-[10px] font-semibold ${f.badge}`}>{f.short}</span>
+                          <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${f.badge}`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${f.dot}`} />
+                            {f.short.split(',')[0]}
+                          </div>
                         </td>
-                        <td className="px-4 py-3 text-right">
-                          <button onClick={() => deleteFaction(f.id)} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-xs font-medium transition">Hapus</button>
-                        </td>
+                        <td className="px-4 py-3 text-right"><button onClick={() => deleteFaction(f.id)} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-xs font-medium transition">Hapus</button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -509,13 +453,7 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left whitespace-nowrap">
                   <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
-                    <tr>
-                      <th className="px-4 py-3">Waktu</th>
-                      <th className="px-4 py-3">Admin</th>
-                      <th className="px-4 py-3">Aksi</th>
-                      <th className="px-4 py-3">Target</th>
-                      <th className="px-4 py-3">Detail</th>
-                    </tr>
+                    <tr><th className="px-4 py-3">Waktu</th><th className="px-4 py-3">Admin</th><th className="px-4 py-3">Aksi</th><th className="px-4 py-3">Target</th><th className="px-4 py-3">Detail</th></tr>
                   </thead>
                   <tbody>
                     {logs.map(l => (
@@ -538,24 +476,17 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
       {actionModal && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-line bg-card p-5 shadow-2xl">
-            <h3 className="text-lg font-bold text-main mb-4">
-              {actionModal.type === 'BAN' ? 'Blokir Permanen (Ban)' : 'Beri Jeda (Timeout)'}
-            </h3>
+            <h3 className="text-lg font-bold text-main mb-4">{actionModal.type === 'BAN' ? 'Blokir Permanen (Ban)' : 'Beri Jeda (Timeout)'}</h3>
             <label className="text-xs font-semibold text-muted mb-1 block">Alasan</label>
             <input type="text" value={reasonInput} onChange={e => setReasonInput(e.target.value)} placeholder="Contoh: Spam request..." className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent mb-3" />
-            
             {actionModal.type === 'TIMEOUT' && (
               <>
                 <label className="text-xs font-semibold text-muted mb-1 block">Durasi (Menit)</label>
                 <select value={durationInput} onChange={e => setDurationInput(e.target.value)} className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent mb-4">
-                  <option value="15">15 Menit</option>
-                  <option value="60">1 Jam</option>
-                  <option value="360">6 Jam</option>
-                  <option value="1440">24 Jam</option>
+                  <option value="15">15 Menit</option><option value="60">1 Jam</option><option value="360">6 Jam</option><option value="1440">24 Jam</option>
                 </select>
               </>
             )}
-
             <div className="flex justify-end gap-2 mt-2">
               <button onClick={() => setActionModal(null)} className="rounded-lg px-4 py-2 text-sm font-medium text-muted hover:text-main">Batal</button>
               <button onClick={() => executeAction(actionModal.id!, actionModal.type, reasonInput, Number(durationInput))} className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${actionModal.type === 'BAN' ? 'bg-red-500 hover:bg-red-600' : 'bg-orange-500 hover:bg-orange-600'}`}>Konfirmasi</button>
@@ -583,99 +514,53 @@ function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: 
   const [factions, setFactions] = useState<FactionDef[]>([]);
   const [countdown, setCountdown] = useState<{ diffMs: number, target: Date } | null>(null);
 
-  // Drag to scroll logic
   const navRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
 
-  const onMouseDown = (e: React.MouseEvent) => {
-    if (!navRef.current) return;
-    setIsDragging(true);
-    setStartX(e.pageX - navRef.current.offsetLeft);
-    setScrollLeft(navRef.current.scrollLeft);
-  };
+  const onMouseDown = (e: React.MouseEvent) => { if (!navRef.current) return; setIsDragging(true); setStartX(e.pageX - navRef.current.offsetLeft); setScrollLeft(navRef.current.scrollLeft); };
   const onMouseLeave = () => setIsDragging(false);
   const onMouseUp = () => setIsDragging(false);
-  const onMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !navRef.current) return;
-    e.preventDefault();
-    const x = e.pageX - navRef.current.offsetLeft;
-    const walk = (x - startX) * 2;
-    navRef.current.scrollLeft = scrollLeft - walk;
-  };
-  const onWheel = (e: React.WheelEvent) => {
-    if (navRef.current) {
-      navRef.current.scrollLeft += e.deltaY;
-    }
-  };
+  const onMouseMove = (e: React.MouseEvent) => { if (!isDragging || !navRef.current) return; e.preventDefault(); const x = e.pageX - navRef.current.offsetLeft; const walk = (x - startX) * 2; navRef.current.scrollLeft = scrollLeft - walk; };
+  const onWheel = (e: React.WheelEvent) => { if (navRef.current) navRef.current.scrollLeft += e.deltaY; };
 
   useEffect(() => {
     const activeEl = navRef.current?.querySelector('[data-active="true"]') as HTMLElement;
-    if (activeEl) {
-      activeEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-    }
+    if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
   }, [activeCat]);
 
-  useEffect(() => {
-    fetch('/api/factions').then(res => res.json()).then(setFactions);
-  }, []);
+  useEffect(() => { fetch('/api/factions').then(res => res.json()).then(setFactions); }, []);
 
   useEffect(() => {
     if (!isAdmin) return;
     const fetchPending = async () => {
       const res = await fetch('/api/admin/requests');
-      if (res.ok) {
-        const reqs = await res.json();
-        setPendingCount(reqs.filter((r: any) => r.status === 'PENDING').length);
-      }
+      if (res.ok) { const reqs = await res.json(); setPendingCount(reqs.filter((r: any) => r.status === 'PENDING').length); }
     };
-    fetchPending();
-    const int = setInterval(fetchPending, 15000);
-    return () => clearInterval(int);
+    fetchPending(); const int = setInterval(fetchPending, 15000); return () => clearInterval(int);
   }, [isAdmin]);
 
   useEffect(() => {
     const updateTimer = () => {
-      const now = new Date();
-      const wibOffset = 7 * 60 * 60 * 1000;
-      const nowWib = new Date(now.getTime() + wibOffset);
-      const h = nowWib.getUTCHours();
-      let targetWib = new Date(nowWib);
-      targetWib.setUTCHours(0, 0, 0, 0);
-      if (h < 6) targetWib.setUTCHours(6, 0, 0, 0);
-      else if (h < 18) targetWib.setUTCHours(18, 0, 0, 0);
-      else { targetWib.setUTCDate(targetWib.getUTCDate() + 1); targetWib.setUTCHours(6, 0, 0, 0); }
-      const diffMs = targetWib.getTime() - nowWib.getTime();
-      setCountdown({ diffMs, target: new Date(targetWib.getTime() - wibOffset) });
+      const now = new Date(); const wibOffset = 7 * 60 * 60 * 1000; const nowWib = new Date(now.getTime() + wibOffset); const h = nowWib.getUTCHours();
+      let targetWib = new Date(nowWib); targetWib.setUTCHours(0, 0, 0, 0);
+      if (h < 6) targetWib.setUTCHours(6, 0, 0, 0); else if (h < 18) targetWib.setUTCHours(18, 0, 0, 0); else { targetWib.setUTCDate(targetWib.getUTCDate() + 1); targetWib.setUTCHours(6, 0, 0, 0); }
+      const diffMs = targetWib.getTime() - nowWib.getTime(); setCountdown({ diffMs, target: new Date(targetWib.getTime() - wibOffset) });
     };
-    updateTimer();
-    const id = setInterval(updateTimer, 1000);
-    return () => clearInterval(id);
+    updateTimer(); const id = setInterval(updateTimer, 1000); return () => clearInterval(id);
   }, []);
 
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
-      const res = await fetch('/api/players', { cache: 'no-store' });
-      const json: ApiData = await res.json();
+      const res = await fetch('/api/players', { cache: 'no-store' }); const json: ApiData = await res.json();
       if (!json.ok) throw new Error(json.error || 'Gagal memuat data');
-      setData(json);
-      setError(null);
-      setLastFetch(new Date());
-    } catch (e: any) {
-      setError(e.message || 'Terjadi kesalahan');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+      setData(json); setError(null); setLastFetch(new Date());
+    } catch (e: any) { setError(e.message || 'Terjadi kesalahan'); } finally { setLoading(false); setRefreshing(false); }
   }, []);
 
-  useEffect(() => {
-    load();
-    const id = setInterval(load, refreshMs);
-    return () => clearInterval(id);
-  }, [load, refreshMs]);
+  useEffect(() => { load(); const id = setInterval(load, refreshMs); return () => clearInterval(id); }, [load, refreshMs]);
 
   const enriched = useMemo(() => (data?.players ?? []).map(p => ({ ...p, faction: detectFaction(p.name, factions) })), [data, factions]);
   const counts = useMemo(() => {
@@ -703,7 +588,7 @@ function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: 
   const navCats = useMemo(() => {
     const items = [
       { id: 'SEMUA', short: 'Semua', dot: 'bg-accent' },
-      ...factions.map(f => ({ id: f.id, short: f.short, dot: f.dot })),
+      ...factions.map(f => ({ id: f.id, short: f.short.split(',')[0], dot: f.dot })), // Tampilkan alias pertama
       { id: 'WARGA', short: WARGA.short, dot: WARGA.dot }
     ];
     return items.filter(it => (counts[it.id] ?? 0) > 0 || it.id === activeCat);
@@ -713,34 +598,19 @@ function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: 
 
   return (
     <main className="min-h-screen bg-app text-main">
-      
-      {/* ── Premium Floating Nav Bar ── */}
       <div className="fixed top-3 left-0 right-0 z-40 flex justify-center px-3">
         <div className="relative w-full max-w-5xl overflow-hidden rounded-full">
-          
           <div className="pointer-events-none absolute left-0 top-0 z-20 h-full w-12 bg-gradient-to-r from-app via-app/80 to-transparent rounded-l-full backdrop-blur-[2px]" />
           
           <div 
-            ref={navRef}
-            onMouseDown={onMouseDown}
-            onMouseLeave={onMouseLeave}
-            onMouseUp={onMouseUp}
-            onMouseMove={onMouseMove}
-            onWheel={onWheel}
+            ref={navRef} onMouseDown={onMouseDown} onMouseLeave={onMouseLeave} onMouseUp={onMouseUp} onMouseMove={onMouseMove} onWheel={onWheel}
             className={`nav-scroll no-scrollbar flex items-center gap-1 overflow-x-auto rounded-full border border-line bg-nav px-3 py-1.5 shadow-[0_4px_30px_rgba(0,0,0,0.3)] backdrop-blur-xl ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
           >
             {navCats.map(cat => {
               const active = activeCat === cat.id;
               return (
-                <button
-                  key={cat.id}
-                  data-active={active}
-                  onClick={() => setActiveCat(cat.id)}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-300 ${
-                    active 
-                      ? 'bg-accent text-accent-text shadow-[0_0_12px_var(--accent)]' 
-                      : 'text-muted hover:bg-hover hover:text-main'
-                  }`}
+                <button key={cat.id} data-active={active} onClick={() => setActiveCat(cat.id)}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-300 ${active ? 'bg-accent text-accent-text shadow-[0_0_12px_var(--accent)]' : 'text-muted hover:bg-hover hover:text-main'}`}
                 >
                   <span className={`h-1.5 w-1.5 rounded-full transition-colors ${active ? 'bg-accent-text' : cat.dot}`} />
                   <span>{cat.short}</span>
@@ -749,9 +619,7 @@ function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: 
               );
             })}
           </div>
-          
           <div className="pointer-events-none absolute right-0 top-0 z-20 h-full w-12 bg-gradient-to-l from-app via-app/80 to-transparent rounded-r-full backdrop-blur-[2px]" />
-          
         </div>
       </div>
 
@@ -766,30 +634,18 @@ function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: 
           <div className="flex flex-wrap items-center gap-2">
             {countdown && (
               <div className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-mono transition-colors ${isWarning ? 'border-red-500/50 bg-red-500/10 text-red-500' : 'border-line bg-card text-muted'}`}>
-                <span className="hidden sm:inline">Restart dalam</span>
-                <span className="sm:hidden">Restart</span>
-                <span className="font-bold">{formatTime(countdown.diffMs)}</span>
+                <span className="hidden sm:inline">Restart dalam</span><span className="sm:hidden">Restart</span><span className="font-bold">{formatTime(countdown.diffMs)}</span>
               </div>
             )}
-
             {isAdmin && (
               <button onClick={onOpenAdmin} className="relative flex h-8 items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 text-emerald-500 transition hover:bg-emerald-500/20" title="Admin Panel">
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
                 <span className="text-xs font-semibold">Admin</span>
-                {pendingCount > 0 && (
-                  <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white border-2 border-app">{pendingCount}</span>
-                )}
+                {pendingCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white border-2 border-app">{pendingCount}</span>}
               </button>
             )}
-
-            <button onClick={onOpenSettings} className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-card text-muted transition-all duration-300 hover:border-accent/50 hover:text-main hover:rotate-90" title="Pengaturan">
-              <GearIcon className="h-4 w-4" />
-            </button>
-
-            <button onClick={() => setAiOpen(true)} className="group flex items-center gap-2 rounded-full border border-line bg-card px-4 py-1.5 text-xs font-medium text-accent transition hover:border-accent/50 hover:bg-hover">
-              <SparkIcon className="h-3.5 w-3.5" />
-              Tanya AI
-            </button>
+            <button onClick={onOpenSettings} className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-card text-muted transition-all duration-300 hover:border-accent/50 hover:text-main hover:rotate-90" title="Pengaturan"><GearIcon className="h-4 w-4" /></button>
+            <button onClick={() => setAiOpen(true)} className="group flex items-center gap-2 rounded-full border border-line bg-card px-4 py-1.5 text-xs font-medium text-accent transition hover:border-accent/50 hover:bg-hover"><SparkIcon className="h-3.5 w-3.5" />Tanya AI</button>
           </div>
         </header>
 
@@ -841,7 +697,11 @@ function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: 
                       <td className="px-4"><span className="inline-flex items-center rounded-md border border-line bg-app px-2 py-0.5 font-mono text-[11px] font-medium text-main">#{p.id}</span></td>
                       <td className="px-4">
                         <div className="flex items-center gap-2">
-                          <span className={`inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold ${fac.badge}`}>{fac.short}</span>
+                          {/* WIDGET STYLE BADGE */}
+                          <div className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${fac.badge}`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${fac.dot}`} />
+                            {fac.short.split(',')[0]}
+                          </div>
                           <span className="truncate text-[13px] text-main max-w-[120px] sm:max-w-none">{p.name}</span>
                         </div>
                       </td>
@@ -863,33 +723,19 @@ function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: 
           </div>
         </div>
       </div>
-
       <AIDrawer open={aiOpen} onClose={() => setAiOpen(false)} data={data} enriched={enriched} counts={counts} activeCat={activeCat} factions={factions} />
     </main>
   );
 }
 
 /* ══════════════ Settings Modal ══════════════ */
-function SettingsModal({ 
-  open, onClose, currentTheme, currentRefresh, currentCompact, onSave 
-}: { 
-  open: boolean, 
-  onClose: () => void, 
-  currentTheme: any, 
-  currentRefresh: number, 
-  currentCompact: boolean, 
-  onSave: (t: any, r: number, c: boolean) => void 
-}) {
+function SettingsModal({ open, onClose, currentTheme, currentRefresh, currentCompact, onSave }: any) {
   const [theme, setTheme] = useState(currentTheme);
   const [refreshMs, setRefreshMs] = useState(currentRefresh);
   const [compactMode, setCompactMode] = useState(currentCompact);
 
   useEffect(() => {
-    if (open) {
-      setTheme(currentTheme);
-      setRefreshMs(currentRefresh);
-      setCompactMode(currentCompact);
-    }
+    if (open) { setTheme(currentTheme); setRefreshMs(currentRefresh); setCompactMode(currentCompact); }
   }, [open, currentTheme, currentRefresh, currentCompact]);
 
   if (!open) return null;
@@ -916,7 +762,7 @@ function SettingsModal({
                 { id: 'cyberpunk', label: 'Cyberpunk', bg: 'bg-[#050505]', border: 'border-[#fcee0a]' },
                 { id: 'nord', label: 'Nord', bg: 'bg-[#2e3440]', border: 'border-[#4c566a]' }
               ].map(t => (
-                <button key={t.id} onClick={() => setTheme(t.id as any)} className={`group relative flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${theme === t.id ? 'border-accent ring-2 ring-accent/20' : 'border-line hover:border-accent/40'}`}>
+                <button key={t.id} onClick={() => setTheme(t.id)} className={`group relative flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${theme === t.id ? 'border-accent ring-2 ring-accent/20' : 'border-line hover:border-accent/40'}`}>
                   <div className={`h-10 w-full rounded-md border ${t.bg} ${t.border} flex items-center justify-center`}><div className={`h-1.5 w-6 rounded-full ${theme === t.id ? 'bg-accent' : 'bg-line'}`} /></div>
                   <span className={`text-xs font-medium ${theme === t.id ? 'text-accent' : 'text-muted group-hover:text-main'}`}>{t.label}</span>
                 </button>
