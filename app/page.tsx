@@ -58,14 +58,46 @@ export default function App() {
   const [authMeta, setAuthMeta] = useState<{ timeoutUntil?: string; reason?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+
+  // Anti-Screenshot State
   const [isBlurred, setIsBlurred] = useState(false);
 
+  // Theme & Settings State (Lifted to App)
+  const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
+  const [refreshMs, setRefreshMs] = useState(60000);
+  const [compactMode, setCompactMode] = useState(false);
+
+  // Initialize Device ID and Settings
   useEffect(() => {
     let id = localStorage.getItem('ime-device-id');
     if (!id) { id = crypto.randomUUID(); localStorage.setItem('ime-device-id', id); }
     setDeviceId(id);
+
+    const savedTheme = localStorage.getItem('ime-theme') as any;
+    if (savedTheme) setTheme(savedTheme);
+    const savedRefresh = localStorage.getItem('ime-refresh');
+    if (savedRefresh) setRefreshMs(Number(savedRefresh));
+    const savedCompact = localStorage.getItem('ime-compact');
+    if (savedCompact) setCompactMode(savedCompact === 'true');
   }, []);
 
+  // Apply Theme instantly
+  useEffect(() => {
+    localStorage.setItem('ime-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  // Save Settings without Reload
+  const handleSaveSettings = (newTheme: any, newRefresh: number, newCompact: boolean) => {
+    setTheme(newTheme);
+    setRefreshMs(newRefresh);
+    setCompactMode(newCompact);
+    localStorage.setItem('ime-refresh', String(newRefresh));
+    localStorage.setItem('ime-compact', String(newCompact));
+    setSettingsOpen(false);
+  };
+
+  // Check Auth
   useEffect(() => {
     if (!deviceId) return;
     const checkAuth = async () => {
@@ -81,40 +113,48 @@ export default function App() {
     return () => clearInterval(interval);
   }, [deviceId]);
 
-  // ANTI-SCREENSHOT LOGIC (MOBILE & PC)
+  // ══════════ ANTI-SCREENSHOT LOGIC ══════════
   useEffect(() => {
-    // 1. Blur saat pindah tab / buka recent apps (Android/iOS)
+    // 1. Detect tab change, app switch, or minimize
     const handleVisibilityChange = () => {
       if (document.hidden) setIsBlurred(true);
-      else setTimeout(() => setIsBlurred(false), 500); // Delay dikit biar ga kedip
+      else setTimeout(() => setIsBlurred(false), 300);
     };
     
-    // 2. Blur saat jendela kehilangan fokus (misal klik Snipping Tool)
+    // 2. Detect window blur (e.g., Snipping Tool or Alt+Tab)
     const handleBlur = () => setIsBlurred(true);
     const handleFocus = () => setTimeout(() => setIsBlurred(false), 300);
+    const handlePageHide = () => setIsBlurred(true);
 
-    // 3. Blokir PrintScreen & Ctrl+P (PC)
+    // 3. Block Keyboard Shortcuts (PrintScreen, Ctrl+P, Ctrl+S, Ctrl+U)
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 's' || e.key === 'P' || e.key === 'S')) {
+      if ((e.ctrlKey || e.metaKey) && ['p', 's', 'u'].includes(e.key.toLowerCase())) {
         e.preventDefault();
       }
       if (e.key === 'PrintScreen') {
         navigator.clipboard.writeText('⚠️ Screenshot dilarang! Device ID Anda telah dicatat oleh sistem IME Roleplay.');
         setIsBlurred(true);
-        setTimeout(() => setIsBlurred(false), 2500);
+        setTimeout(() => setIsBlurred(false), 2000);
       }
     };
+
+    // 4. Block Right Click
+    const handleContextMenu = (e: MouseEvent) => e.preventDefault();
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleBlur);
     window.addEventListener('focus', handleFocus);
+    window.addEventListener('pagehide', handlePageHide);
     document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('contextmenu', handleContextMenu);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('pagehide', handlePageHide);
       document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('contextmenu', handleContextMenu);
     };
   }, []);
 
@@ -134,15 +174,32 @@ export default function App() {
   }
 
   return (
-    <div 
-      className={`relative min-h-screen transition-all duration-200 select-none ${isBlurred ? 'blur-[20px] scale-[0.98] opacity-50' : ''}`}
-      onContextMenu={(e) => e.preventDefault()} 
-    >
+    <div className="relative min-h-screen bg-app text-main overflow-hidden">
+      
+      {/* Watermark (Z-Index Tertinggi, TIDAK Terkena Blur) */}
       <Watermark deviceId={deviceId} />
 
-      <Home isAdmin={authStatus === 'ADMIN'} onOpenSettings={() => setSettingsOpen(true)} onOpenAdmin={() => setAdminOpen(true)} />
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      {authStatus === 'ADMIN' && <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />}
+      {/* Konten Utama (Akan Terkena Blur saat Screenshot) */}
+      <div className={`transition-all duration-300 ease-out ${isBlurred ? 'blur-[24px] scale-[0.98] opacity-30 pointer-events-none' : ''}`}>
+        <Home 
+          isAdmin={authStatus === 'ADMIN'} 
+          refreshMs={refreshMs} 
+          compactMode={compactMode}
+          onOpenSettings={() => setSettingsOpen(true)} 
+          onOpenAdmin={() => setAdminOpen(true)} 
+        />
+        {authStatus === 'ADMIN' && <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />}
+      </div>
+
+      {/* Modal Settings (Di luar blur agar tetap bisa dilihat saat buka settings, tapi tidak apa-apa kalau kena blur juga) */}
+      <SettingsModal 
+        open={settingsOpen} 
+        onClose={() => setSettingsOpen(false)} 
+        currentTheme={theme}
+        currentRefresh={refreshMs}
+        currentCompact={compactMode}
+        onSave={handleSaveSettings}
+      />
     </div>
   );
 }
@@ -532,7 +589,7 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
 }
 
 /* ══════════════ Main Home (Player Monitor) ══════════════ */
-function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOpenSettings: () => void, onOpenAdmin: () => void }) {
+function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, refreshMs: number, compactMode: boolean, onOpenSettings: () => void, onOpenAdmin: () => void }) {
   const [data, setData] = useState<ApiData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -545,12 +602,9 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
   const [pendingCount, setPendingCount] = useState(0);
   
   const [factions, setFactions] = useState<FactionDef[]>([]);
-  const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
-  const [refreshMs, setRefreshMs] = useState(60000);
-  const [compactMode, setCompactMode] = useState(false);
   const [countdown, setCountdown] = useState<{ diffMs: number, target: Date } | null>(null);
 
-  // Drag to scroll logic
+  // Drag to scroll logic untuk Dynamic Island
   const navRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
@@ -587,22 +641,6 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
   useEffect(() => {
     fetch('/api/factions').then(res => res.json()).then(setFactions);
   }, []);
-
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('ime-theme') as any;
-    if (savedTheme) setTheme(savedTheme);
-    const savedRefresh = localStorage.getItem('ime-refresh');
-    if (savedRefresh) setRefreshMs(Number(savedRefresh));
-    const savedCompact = localStorage.getItem('ime-compact');
-    if (savedCompact) setCompactMode(savedCompact === 'true');
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('ime-theme', theme);
-    document.documentElement.setAttribute('data-theme', theme);
-  }, [theme]);
-  useEffect(() => { localStorage.setItem('ime-refresh', String(refreshMs)); }, [refreshMs]);
-  useEffect(() => { localStorage.setItem('ime-compact', String(compactMode)); }, [compactMode]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -710,7 +748,7 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
             onMouseUp={onMouseUp}
             onMouseMove={onMouseMove}
             onWheel={onWheel}
-            className={`no-scrollbar flex items-center gap-1 overflow-x-auto rounded-full border border-line bg-nav px-3 py-1.5 shadow-[0_4px_30px_rgba(0,0,0,0.3)] backdrop-blur-xl ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+            className={`nav-scroll no-scrollbar flex items-center gap-1 overflow-x-auto rounded-full border border-line bg-nav px-3 py-1.5 shadow-[0_4px_30px_rgba(0,0,0,0.3)] backdrop-blur-xl ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
           >
             {navCats.map(cat => {
               const active = activeCat === cat.id;
@@ -853,25 +891,28 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
 }
 
 /* ══════════════ Settings Modal ══════════════ */
-function SettingsModal({ open, onClose }: { open: boolean, onClose: () => void }) {
-  const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
-  const [refreshMs, setRefreshMs] = useState(60000);
-  const [compactMode, setCompactMode] = useState(false);
+function SettingsModal({ 
+  open, onClose, currentTheme, currentRefresh, currentCompact, onSave 
+}: { 
+  open: boolean, 
+  onClose: () => void, 
+  currentTheme: any, 
+  currentRefresh: number, 
+  currentCompact: boolean, 
+  onSave: (t: any, r: number, c: boolean) => void 
+}) {
+  const [theme, setTheme] = useState(currentTheme);
+  const [refreshMs, setRefreshMs] = useState(currentRefresh);
+  const [compactMode, setCompactMode] = useState(currentCompact);
 
+  // Sync state lokal jika modal dibuka ulang
   useEffect(() => {
-    setTheme((localStorage.getItem('ime-theme') as any) || 'dark');
-    setRefreshMs(Number(localStorage.getItem('ime-refresh')) || 60000);
-    setCompactMode(localStorage.getItem('ime-compact') === 'true');
-  }, [open]);
-
-  const save = () => {
-    localStorage.setItem('ime-theme', theme);
-    localStorage.setItem('ime-refresh', String(refreshMs));
-    localStorage.setItem('ime-compact', String(compactMode));
-    document.documentElement.setAttribute('data-theme', theme);
-    onClose();
-    window.location.reload();
-  };
+    if (open) {
+      setTheme(currentTheme);
+      setRefreshMs(currentRefresh);
+      setCompactMode(currentCompact);
+    }
+  }, [open, currentTheme, currentRefresh, currentCompact]);
 
   if (!open) return null;
 
@@ -920,7 +961,7 @@ function SettingsModal({ open, onClose }: { open: boolean, onClose: () => void }
           </div>
         </div>
         <div className="border-t border-line bg-app px-5 py-3 text-right">
-          <button onClick={save} className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-text transition hover:bg-accent-hover">Simpan & Tutup</button>
+          <button onClick={() => onSave(theme, refreshMs, compactMode)} className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-text transition hover:bg-accent-hover">Simpan & Tutup</button>
         </div>
       </div>
     </div>
