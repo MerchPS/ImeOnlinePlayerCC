@@ -1607,23 +1607,219 @@ function HistoryModal({ open, onClose, sessions, onlineNames, watch, onToggleWat
   }, [open, q, sessions, onlineNames]);
 
   if (!open) return null;
+  
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-line bg-card shadow-2xl">
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <div><div className="text-sm font-semibold text-main">Riwayat Sesi Pemain</div><div className="text-[11px] text-subtle">Terakhir terlihat & total waktu main</div></div>
-          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+          <div>
+            <div className="text-sm font-semibold text-main">Riwayat Sesi Pemain</div>
+            <div className="text-[11px] text-subtle">Terakhir terlihat & total waktu main</div>
+          </div>
+          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main">
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
         </div>
-        <div className="border-b border-line p-3"><input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Cari nama…" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent/50" /></div>
+        <div className="border-b border-line p-3">
+          <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Cari nama…" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent/50" />
+        </div>
         <div className="flex-1 overflow-y-auto">
-          {rows.length === 0 ? <div className="px-4 py-12 text-center text-sm text-subtle">Belum ada data sesi.</div> : rows.map(r => (
-            <div key={r.name} className="flex items-center gap-3 border-b border-line px-4 py-3">
-              <button onClick={() => onToggleWatch(r.name)} className={watch.has(r.name) ? 'text-amber-500' : 'text-subtle hover:text-amber-500'}><StarIcon className="h-4 w-4" filled={watch.has(r.name)} /></button>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] text-main">{r.name}</div>
-                <div className="mt-0.5 text-[11px] text-muted">
-                  {r.online ? <span className="text-emerald-500">● Online · sesi {fmtDuration(Date.now() - (r.rec.start ?? Date.now()))}</span> : <>Terakhir: {timeAgo(r.rec.last)}</>}
+          {rows.length === 0 ? (
+            <div className="px-4 py-12 text-center text-sm text-subtle">Belum ada data sesi.</div>
+          ) : (
+            rows.map(r => (
+              <div key={r.name} className="flex items-center gap-3 border-b border-line px-4 py-3">
+                <button onClick={() => onToggleWatch(r.name)} className={watch.has(r.name) ? 'text-amber-500' : 'text-subtle hover:text-amber-500'}>
+                  <StarIcon className="h-4 w-4" filled={watch.has(r.name)} />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] text-main">{r.name}</div>
+                  <div className="mt-0.5 text-[11px] text-muted">
+                    {r.online ? <span className="text-emerald-500">● Online · sesi {fmtDuration(Date.now() - (r.rec.start ?? Date.now()))}</span> : <>Terakhir: {timeAgo(r.rec.last)}</>}
+                  </div>
+                </div>
+                <div className="text-right text-[11px] text-muted">
+                  <div className="font-mono text-main">{fmtDuration(r.rec.total + r.cur)}</div>
+                  <div>{r.rec.count}× sesi</div>
                 </div>
               </div>
-              <div className="text-right text-[11px] text-muted"><div className="font-mono text-main">{fmtDuration(r.rec.total + r.cur)}
+            ))
+          )}
+        </div>
+        <div className="border-t border-line bg-app px-5 py-2 text-[10px] text-subtle">Dicatat dari browser ini hanya saat halaman terbuka, jadi angka bisa lebih kecil dari waktu main sebenarnya.</div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════ Settings Modal ══════════════ */
+function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button onClick={() => onChange(!on)} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${on ? 'bg-accent' : 'bg-hover'}`}>
+      <span className={`absolute top-1 left-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${on ? 'translate-x-5' : 'translate-x-0'}`} />
+    </button>
+  );
+}
+
+function SettingsModal({ open, onClose, current, onSave }: { open: boolean; onClose: () => void; current: Settings; onSave: (s: Settings) => void }) {
+  const [draft, setDraft] = useState<Settings>(current);
+  useEffect(() => { if (open) setDraft(current); }, [open, current]);
+  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setDraft(d => ({ ...d, [k]: v }));
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={onClose} />
+      <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-line bg-card shadow-2xl animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between border-b border-line px-5 py-4 sticky top-0 bg-card z-10">
+          <div className="flex items-center gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15"><GearIcon className="h-4 w-4 text-accent" /></span>
+            <div><div className="text-sm font-semibold text-main">Pengaturan</div><div className="text-[11px] text-subtle">Tampilan & preferensi</div></div>
+          </div>
+          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+        </div>
+        <div className="space-y-6 px-5 py-5">
+          <div>
+            <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Tema Tampilan</div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {([
+                { id: 'dark', label: 'Dark', bg: 'bg-[#0c0a08]', border: 'border-[#2a2520]' },
+                { id: 'light', label: 'Light', bg: 'bg-[#f8fafc]', border: 'border-[#e2e8f0]' },
+                { id: 'glass', label: 'Glass', bg: 'bg-[#09090b]', border: 'border-white/10' },
+                { id: 'cyberpunk', label: 'Cyberpunk', bg: 'bg-[#050505]', border: 'border-[#fcee0a]' },
+                { id: 'nord', label: 'Nord', bg: 'bg-[#2e3440]', border: 'border-[#4c566a]' },
+              ] as { id: Theme; label: string; bg: string; border: string }[]).map(t => (
+                <button key={t.id} onClick={() => set('theme', t.id)} className={`group relative flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${draft.theme === t.id ? 'border-accent ring-2 ring-accent/20' : 'border-line hover:border-accent/40'}`}>
+                  <div className={`h-10 w-full rounded-md border ${t.bg} ${t.border} flex items-center justify-center`}><div className={`h-1.5 w-6 rounded-full ${draft.theme === t.id ? 'bg-accent' : 'bg-line'}`} /></div>
+                  <span className={`text-xs font-medium ${draft.theme === t.id ? 'text-accent' : 'text-muted group-hover:text-main'}`}>{t.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <hr className="border-line" />
+
+          <div>
+            <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Gaya Tag Faction</div>
+            <div className="flex rounded-lg border border-line bg-app p-1">
+              <button onClick={() => set('tagStyle', 'pill')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${draft.tagStyle === 'pill' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Pill (Bulat)</button>
+              <button onClick={() => set('tagStyle', 'widget')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${draft.tagStyle === 'widget' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Widget (Soft Card)</button>
+            </div>
+          </div>
+
+          <hr className="border-line" />
+          <div>
+            <div className="mb-3 flex items-center justify-between"><div className="text-[11px] font-semibold uppercase tracking-wider text-subtle">Interval Refresh</div><div className="text-[11px] text-muted">{draft.refreshMs / 1000} detik</div></div>
+            <div className="flex rounded-lg border border-line bg-app p-1">
+              {[30, 60, 120].map(s => (
+                <button key={s} onClick={() => set('refreshMs', s * 1000)} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${draft.refreshMs === s * 1000 ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>{s} Detik</button>
+              ))}
+            </div>
+          </div>
+
+          <hr className="border-line" />
+          <div className="flex items-center justify-between">
+            <div><div className="text-sm font-medium text-main">Mode Ringkas</div><div className="text-[11px] text-muted mt-0.5">Kurangi jarak antar baris tabel agar muat lebih banyak.</div></div>
+            <Toggle on={draft.compact} onChange={v => set('compact', v)} />
+          </div>
+        </div>
+        <div className="border-t border-line bg-app px-5 py-3 text-right sticky bottom-0 z-10">
+          <button onClick={() => onSave(draft)} className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-text transition hover:bg-accent-hover">Simpan & Tutup</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════ AI Drawer ══════════════ */
+function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factionMap }: any) {
+  const [msgs, setMsgs] = useState<AiMsg[]>([]);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [msgs, sending]);
+
+  const buildContext = useCallback(() => {
+    if (!data) return null;
+    const factionSummary: any = {};
+    for (const [id, count] of Object.entries(counts)) {
+      if (id === 'SEMUA' || id === 'GOOD' || id === 'BAD' || id === 'CIVILIAN' || !count) continue;
+      const f = factionMap.get(id);
+      factionSummary[id] = { label: f?.label || 'Unknown', count };
+    }
+    return { totalOnline: data.online, maxSlots: data.max, gate: data.gate, updatedAt: data.updatedAt, currentFilter: activeCat, factions: factionSummary, players: enriched.slice(0, 150).map((p: any) => ({ kantong: p.id, nama: p.name, faction: factionMap.get(p.faction)?.label || 'Untagged', ping: p.ping })) };
+  }, [data, counts, activeCat, enriched, factionMap]);
+
+  async function send(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
+    const next: AiMsg[] = [...msgs, { role: 'user', content: trimmed }];
+    setMsgs(next); setInput(''); setSending(true);
+    try {
+      const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: next, context: buildContext() }) });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Gagal');
+      setMsgs([...next, { role: 'assistant', content: json.text }]);
+    } catch (e: any) { setMsgs([...next, { role: 'assistant', content: `⚠ ${e.message}` }]); } finally { setSending(false); }
+  }
+
+  const SUGGESTIONS = ['Ringkas siapa saja yang online sekarang', 'Faction apa yang paling banyak online?', 'Siapa saja polisi (LSPD/LSSD) yang online?', 'Ada berapa CC dan siapa nama mereka?', 'Player mana yang pingnya paling buruk?'];
+
+  return (
+    <div className={`fixed inset-0 z-50 ${open ? '' : 'pointer-events-none'}`}>
+      <div onClick={onClose} className={`absolute inset-0 bg-black/50 transition-opacity ${open ? 'opacity-100' : 'opacity-0'}`} />
+      <aside className={`absolute right-0 top-0 flex h-full w-full flex-col border-l border-line bg-app transition-transform duration-300 sm:w-[440px] ${open ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
+          <div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15"><SparkIcon className="h-4 w-4 text-accent" /></span><div><div className="text-sm font-semibold text-main">Analisis AI</div><div className="text-[11px] text-subtle">Konteks data realtime</div></div></div>
+          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+        </div>
+        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+          {msgs.length === 0 && (<div className="space-y-3"><p className="text-sm text-muted">Tanya apa saja soal server yang lagi online. Contoh:</p><div className="flex flex-col gap-2">{SUGGESTIONS.map(s => (<button key={s} onClick={() => send(s)} className="rounded-lg border border-line bg-card px-3 py-2 text-left text-[13px] text-muted transition hover:border-accent/40 hover:bg-hover hover:text-main">{s}</button>))}</div></div>)}
+          {msgs.map((m, i) => (<div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed ${m.role === 'user' ? 'bg-accent text-accent-text whitespace-pre-wrap' : 'border border-line bg-card text-main'}`}>{m.role === 'user' ? m.content : renderMarkdown(m.content)}</div></div>))}
+          {sending && (<div className="flex justify-start"><div className="flex gap-1 rounded-xl border border-line bg-card px-3.5 py-3"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '0ms' }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '150ms' }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '300ms' }} /></div></div>)}
+        </div>
+        <div className="border-t border-line p-3">
+          <form onSubmit={e => { e.preventDefault(); send(input); }} className="flex gap-2">
+            <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }} placeholder="Tanya soal player, faction, ping…" rows={1} className="flex-1 resize-none rounded-lg border border-line bg-card px-3 py-2 text-[13px] text-main placeholder-subtle outline-none transition focus:border-accent/50 focus:ring-2 focus:ring-accent/15" />
+            <button type="submit" disabled={sending || !input.trim()} className="flex shrink-0 items-center justify-center rounded-lg bg-accent px-3 text-accent-text transition hover:bg-accent-hover disabled:opacity-30"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg></button>
+          </form>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+/* ══════════════ UI Bits & Icons ══════════════ */
+function Stat({ label, value, accent, small, pulse, delta }: any) {
+  return (
+    <div className="rounded-xl border border-line bg-card p-4 shadow-sm">
+      <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-subtle">
+        {pulse && (
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+          </span>
+        )}
+        {label}
+      </div>
+      <div className="flex items-baseline gap-2">
+        <div className={`mt-1 truncate font-semibold ${accent} ${small ? 'text-base' : 'text-xl'}`}>{value}</div>
+        {delta !== null && delta !== undefined && delta !== 0 && (
+          <span className={`text-[10px] font-bold ${delta > 0 ? 'text-emerald-500' : 'text-red-500'}`}>{delta > 0 ? `+${delta}` : delta}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+function SearchIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>); }
+function RefreshIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>); }
+function SparkIcon({ className }: any) { return (<svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z" /></svg>); }
+function GearIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>); }
+function ClockIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>); }
+function StarIcon({ className, filled }: any) { return (<svg className={className} fill={filled ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>); }
+function DownloadIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>); }
+function LinkIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>); }
+function BugIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>); }
