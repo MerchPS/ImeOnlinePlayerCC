@@ -20,7 +20,7 @@ function pingClass(p: number) { if (p < 80) return 'bg-emerald-500/10 text-emera
 function formatTime(ms: number) { const totalSecs = Math.floor(ms / 1000); const h = Math.floor(totalSecs / 3600); const m = Math.floor((totalSecs % 3600) / 60); const s = totalSecs % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
 function formatDate(iso: string) { return new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }); }
 
-// PERBAIKAN: Mendukung Multiple Aliases (RCMC,RC1), menghapus simbol %, & Mengurutkan dari yang terpanjang (HTH sebelum HT)
+// FUNGSI SAKTI: Menghapus simbol aneh, mendukung koma (RCMC,RC1 / ALLSTAR,ALLSTARS)
 function detectFaction(name: string, factions: FactionDef[]): string {
   const prefix = name.split(' - ')[0].trim();
   
@@ -70,10 +70,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
 
-  // Anti-Screenshot State
   const [isBlurred, setIsBlurred] = useState(false);
 
-  // Theme & Settings State
   const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
   const [refreshMs, setRefreshMs] = useState(60000);
   const [compactMode, setCompactMode] = useState(false);
@@ -120,7 +118,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [deviceId]);
 
-  // ══════════ ANTI-SCREENSHOT LOGIC ══════════
   useEffect(() => {
     const handleVisibilityChange = () => { if (document.hidden) setIsBlurred(true); else setTimeout(() => setIsBlurred(false), 300); };
     const handleBlur = () => setIsBlurred(true);
@@ -176,8 +173,6 @@ export default function App() {
 
   return (
     <div className="relative min-h-screen bg-app text-main overflow-hidden">
-      
-      {/* Konten Utama (Akan Terkena Blur saat Screenshot) */}
       <div className={`transition-all duration-300 ease-out ${isBlurred ? 'blur-[30px] scale-[0.95] opacity-10 pointer-events-none' : ''}`}>
         <Home 
           isAdmin={authStatus === 'ADMIN'} 
@@ -188,7 +183,6 @@ export default function App() {
         />
         {authStatus === 'ADMIN' && <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />}
       </div>
-
       <SettingsModal 
         open={settingsOpen} 
         onClose={() => setSettingsOpen(false)} 
