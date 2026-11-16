@@ -16,14 +16,15 @@ model User {
 }
 
 model AccessRequest {
-  id           String    @id @default(uuid())
-  ipAddress    String
-  deviceId     String    @unique
-  status       String    @default("PENDING") // PENDING, APPROVED, REJECTED, BANNED
-  timeoutUntil DateTime?
-  reason       String?   // <-- BARU: Alasan ban/timeout
-  lastActive   DateTime  @default(now())
-  createdAt    DateTime  @default(now())
+  id              String    @id @default(uuid())
+  ipAddress       String
+  deviceId        String    @unique
+  status          String    @default("PENDING")
+  timeoutUntil    DateTime?
+  reason          String?
+  lastActive      DateTime  @default(now())
+  lastRequestedAt DateTime  @default(now()) // <-- BARU: Untuk Rate Limit
+  createdAt       DateTime  @default(now())
 }
 
 model AuditLog {
@@ -33,4 +34,15 @@ model AuditLog {
   targetDeviceId String
   details        String?
   createdAt      DateTime @default(now())
+}
+
+// <-- BARU: Tabel Faction -->
+model Faction {
+  id        String   @id @default(uuid())
+  label     String
+  short     String
+  matchType String   // "INCLUDES", "STARTS_WITH"
+  badge     String   // Tailwind classes untuk badge
+  dot       String   // Tailwind classes untuk warna dot
+  createdAt DateTime @default(now())
 }
