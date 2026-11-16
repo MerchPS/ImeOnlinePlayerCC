@@ -323,7 +323,7 @@ function ChangelogModal({ onClose }: { onClose: () => void }) {
             </div>
             <div className="flex gap-3">
               <span className="text-emerald-500">✅</span>
-              <p><strong>Grafik Tren Online:</strong> Lihat riwayat player online 24 jam terakhir.</p>
+              <p><strong>Grafik Tren Online:</strong> Lihat riwayat player online 24 jam terakhir</p>
             </div>
             <div className="flex gap-3">
               <span className="text-emerald-500">✅</span>
