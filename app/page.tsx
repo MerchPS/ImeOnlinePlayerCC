@@ -20,21 +20,25 @@ function pingClass(p: number) { if (p < 80) return 'bg-emerald-500/10 text-emera
 function formatTime(ms: number) { const totalSecs = Math.floor(ms / 1000); const h = Math.floor(totalSecs / 3600); const m = Math.floor((totalSecs % 3600) / 60); const s = totalSecs % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
 function formatDate(iso: string) { return new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }); }
 
-// FUNGSI ULTIMATE: Menghapus semua spasi & simbol agar M E D I C tetap terbaca MEDIC
+// FUNGSI BARU: Prioritas cek prefix sebelum dash, sehingga "RB - Ricci" tidak jadi CC
 function detectFaction(name: string, factions: FactionDef[]): string {
-  const cleanName = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-  const rawPrefix = name.split(' - ')[0];
-  const cleanPrefix = rawPrefix.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  // 1. Ambil teks sebelum tanda dash (jika ada)
+  const prefix = name.split(' - ')[0].trim();
+  const cleanPrefix = prefix.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const cleanFullName = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
   for (const f of factions) {
     const cleanShort = f.short.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    if (!cleanShort) continue;
+
+    // Cek berdasarkan prefix terlebih dahulu
+    if (f.matchType === 'STARTS_WITH' && cleanPrefix.startsWith(cleanShort)) return f.id;
+    if (f.matchType === 'INCLUDES' && cleanPrefix.includes(cleanShort)) return f.id;
     
-    if (f.matchType === 'STARTS_WITH') {
-      if (cleanPrefix.startsWith(cleanShort) || cleanName.startsWith(cleanShort)) return f.id;
-    }
-    if (f.matchType === 'INCLUDES') {
-      // Prioritas cek di prefix, kalau tidak ketemu cek di seluruh nama
-      if (cleanPrefix.includes(cleanShort) || cleanName.includes(cleanShort)) return f.id;
+    // Jika tidak ada dash, cek dari awal nama (misal: "M E D I C SUE")
+    if (!name.includes(' - ')) {
+      if (f.matchType === 'STARTS_WITH' && cleanFullName.startsWith(cleanShort)) return f.id;
+      if (f.matchType === 'INCLUDES' && cleanFullName.includes(cleanShort)) return f.id;
     }
   }
   return 'WARGA';
@@ -59,6 +63,9 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
 
+  // Proteksi Screenshot
+  const [isBlurred, setIsBlurred] = useState(false);
+
   useEffect(() => {
     let id = localStorage.getItem('ime-device-id');
     if (!id) { id = crypto.randomUUID(); localStorage.setItem('ime-device-id', id); }
@@ -80,6 +87,34 @@ export default function App() {
     return () => clearInterval(interval);
   }, [deviceId]);
 
+  // Blur saat pindah tab (anti snipping tool)
+  useEffect(() => {
+    const handleBlur = () => setIsBlurred(true);
+    const handleFocus = () => setIsBlurred(false);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
+  // Blokir Ctrl+P, Ctrl+S, PrintScreen
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 's' || e.key === 'P' || e.key === 'S')) {
+        e.preventDefault();
+      }
+      if (e.key === 'PrintScreen') {
+        navigator.clipboard.writeText('Screenshot dilarang!'); // Menimpa clipboard
+        setIsBlurred(true);
+        setTimeout(() => setIsBlurred(false), 2000);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   if (authStatus === 'LOADING') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-app text-main">
@@ -96,11 +131,38 @@ export default function App() {
   }
 
   return (
-    <>
+    <div 
+      className={`relative min-h-screen transition-all duration-300 ${isBlurred ? 'blur-2xl' : ''}`}
+      onContextMenu={(e) => e.preventDefault()} // Blokir Klik Kanan
+    >
+      {/* Watermark Tersembunyi */}
+      <Watermark deviceId={deviceId} />
+
       <Home isAdmin={authStatus === 'ADMIN'} onOpenSettings={() => setSettingsOpen(true)} onOpenAdmin={() => setAdminOpen(true)} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {authStatus === 'ADMIN' && <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />}
-    </>
+    </div>
+  );
+}
+
+/* ══════════════ Watermark Component ══════════════ */
+function Watermark({ deviceId }: { deviceId: string }) {
+  const [time, setTime] = useState(new Date().toLocaleTimeString('id-ID'));
+  useEffect(() => {
+    const int = setInterval(() => setTime(new Date().toLocaleTimeString('id-ID')), 1000);
+    return () => clearInterval(int);
+  }, []);
+
+  const text = `IME ROLEPLAY • ${deviceId.slice(0, 8)} • ${time}`;
+  
+  return (
+    <div className="pointer-events-none fixed inset-0 z-[9999] flex flex-wrap items-center justify-center overflow-hidden opacity-[0.04] select-none">
+      {Array.from({ length: 50 }).map((_, i) => (
+        <div key={i} className="text-2xl font-bold -rotate-45 p-8 whitespace-nowrap text-main">
+          {text}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -507,14 +569,12 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
     const walk = (x - startX) * 2;
     navRef.current.scrollLeft = scrollLeft - walk;
   };
-  // Mouse Wheel to horizontal scroll
   const onWheel = (e: React.WheelEvent) => {
     if (navRef.current) {
       navRef.current.scrollLeft += e.deltaY;
     }
   };
 
-  // Auto scroll to active item
   useEffect(() => {
     const activeEl = navRef.current?.querySelector('[data-active="true"]') as HTMLElement;
     if (activeEl) {
