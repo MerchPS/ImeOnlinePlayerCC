@@ -20,11 +20,22 @@ function pingClass(p: number) { if (p < 80) return 'bg-emerald-500/10 text-emera
 function formatTime(ms: number) { const totalSecs = Math.floor(ms / 1000); const h = Math.floor(totalSecs / 3600); const m = Math.floor((totalSecs % 3600) / 60); const s = totalSecs % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
 function formatDate(iso: string) { return new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }); }
 
+// FUNGSI ULTIMATE: Menghapus semua spasi & simbol agar M E D I C tetap terbaca MEDIC
 function detectFaction(name: string, factions: FactionDef[]): string {
-  const prefix = name.split(' - ')[0].toUpperCase().trim();
+  const cleanName = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const rawPrefix = name.split(' - ')[0];
+  const cleanPrefix = rawPrefix.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+
   for (const f of factions) {
-    if (f.matchType === 'STARTS_WITH' && prefix.startsWith(f.short.toUpperCase())) return f.id;
-    if (f.matchType === 'INCLUDES' && prefix.includes(f.short.toUpperCase())) return f.id;
+    const cleanShort = f.short.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    
+    if (f.matchType === 'STARTS_WITH') {
+      if (cleanPrefix.startsWith(cleanShort) || cleanName.startsWith(cleanShort)) return f.id;
+    }
+    if (f.matchType === 'INCLUDES') {
+      // Prioritas cek di prefix, kalau tidak ketemu cek di seluruh nama
+      if (cleanPrefix.includes(cleanShort) || cleanName.includes(cleanShort)) return f.id;
+    }
   }
   return 'WARGA';
 }
@@ -628,7 +639,6 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
       <div className="fixed top-3 left-0 right-0 z-40 flex justify-center px-3">
         <div className="relative w-full max-w-5xl overflow-hidden rounded-full">
           
-          {/* Left Blur/Fade Mask */}
           <div className="pointer-events-none absolute left-0 top-0 z-20 h-full w-12 bg-gradient-to-r from-app via-app/80 to-transparent rounded-l-full backdrop-blur-[2px]" />
           
           <div 
@@ -661,7 +671,6 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
             })}
           </div>
           
-          {/* Right Blur/Fade Mask */}
           <div className="pointer-events-none absolute right-0 top-0 z-20 h-full w-12 bg-gradient-to-l from-app via-app/80 to-transparent rounded-r-full backdrop-blur-[2px]" />
           
         </div>
