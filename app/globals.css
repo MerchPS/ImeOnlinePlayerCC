@@ -39,7 +39,7 @@
   [data-theme="cyberpunk"] body { background-image: linear-gradient(rgba(252, 238, 10, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(252, 238, 10, 0.03) 1px, transparent 1px); background-size: 20px 20px; }
 }
 
-/* Proteksi Anti-Screenshot */
+/* ══════════ ANTI-SCREENSHOT & MOBILE PROTECTION ══════════ */
 @media print {
   body { display: none !important; }
 }
@@ -47,10 +47,16 @@
 * {
   user-select: none !important;
   -webkit-user-select: none !important;
-  -webkit-touch-callout: none !important;
+  -webkit-touch-callout: none !important; /* Blokir long-press di iOS */
+  -webkit-tap-highlight-color: transparent !important;
 }
 
-/* Sembunyikan scrollbar untuk HP */
+/* Blokir seleksi teks & drag gambar */
+img, a {
+  pointer-events: none !important;
+  -webkit-user-drag: none !important;
+}
+
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
 
