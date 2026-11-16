@@ -13,6 +13,12 @@ type FactionDef = { id: string; label: string; short: string; matchType: string;
 
 const WARGA: FactionDef = { id: 'WARGA', short: 'Untagged', label: 'Untagged', matchType: 'NONE', badge: 'bg-hover text-muted border-line', dot: 'bg-muted' };
 
+// Daftar Faction cadangan (jika belum ada di DB)
+const FALLBACK_FACTIONS: FactionDef[] = [
+  { id: 'bmc', label: 'BMC', short: 'BMC', matchType: 'STARTS_WITH', badge: 'bg-[#2a1a2e] text-[#d89ee8] border-[#4a2555]', dot: 'bg-[#c96ce8]' },
+  { id: 'cbmc', label: 'CBMC', short: 'CBMC', matchType: 'STARTS_WITH', badge: 'bg-[#2e1a2a] text-[#e89ec9] border-[#55254a]', dot: 'bg-[#e86caa]' },
+];
+
 /* ══════════════ Utils ══════════════ */
 const PAGE_SIZE = 25;
 const fmt = (n: number) => n.toLocaleString('id-ID');
@@ -20,13 +26,20 @@ function pingClass(p: number) { if (p < 80) return 'bg-emerald-500/10 text-emera
 function formatTime(ms: number) { const totalSecs = Math.floor(ms / 1000); const h = Math.floor(totalSecs / 3600); const m = Math.floor((totalSecs % 3600) / 60); const s = totalSecs % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
 function formatDate(iso: string) { return new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }); }
 
-// FUNGSI SAKTI: Menghapus simbol aneh, mendukung koma (RCMC,RC1 / ALLSTAR,ALLSTARS / BMC,CBMC)
+// FUNGSI SAKTI: Mendukung koma & mendeteksi dari yang terpanjang (CBMC duluan baru BMC)
 function detectFaction(name: string, factions: FactionDef[]): string {
   const prefix = name.split(' - ')[0].trim();
   const cleanPrefix = prefix.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   const cleanFullName = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
-  const sortedFactions = [...factions].sort((a, b) => b.short.length - a.short.length);
+  // Gabungkan database dengan fallback
+  const allFactions = [...factions];
+  FALLBACK_FACTIONS.forEach(fb => {
+    if (!allFactions.find(f => f.short === fb.short)) allFactions.push(fb);
+  });
+
+  // Urutkan dari yang paling panjang (CBMC akan diproses sebelum BMC)
+  const sortedFactions = allFactions.sort((a, b) => b.short.length - a.short.length);
 
   for (const f of sortedFactions) {
     const aliases = f.short.split(',').map(s => s.replace(/[^a-zA-Z0-9]/g, '').toUpperCase());
@@ -67,11 +80,10 @@ export default function App() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [isBlurred, setIsBlurred] = useState(false);
 
-  // Settings State
   const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
   const [refreshMs, setRefreshMs] = useState(60000);
   const [compactMode, setCompactMode] = useState(false);
-  const [tagStyle, setTagStyle] = useState<'pill' | 'widget'>('pill'); // State untuk Gaya Tag
+  const [tagStyle, setTagStyle] = useState<'pill' | 'widget'>('widget'); // Default ke widget
 
   useEffect(() => {
     let id = localStorage.getItem('ime-device-id');
@@ -121,8 +133,7 @@ export default function App() {
 
   // ══════════ ANTI-SCREENSHOT LOGIC (100% MOBILE SAFE) ══════════
   useEffect(() => {
-    // HANYA Blur jika pindah tab / minimize aplikasi (Buka Recent Apps)
-    // Event window.blur dan touchstart DIHAPUS agar scroll/klik di HP tidak ngeblur
+    // Blur HANYA jika pindah tab/minimize
     const handleVisibilityChange = () => { 
       if (document.hidden) {
         setIsBlurred(true); 
@@ -131,7 +142,6 @@ export default function App() {
       }
     };
     
-    // Blokir PrintScreen & Shortcut (Hanya PC)
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && ['p', 's', 'u'].includes(e.key.toLowerCase())) e.preventDefault();
       if (e.key === 'PrintScreen') {
@@ -406,8 +416,8 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
               <div className="rounded-xl border border-line bg-card p-5">
                 <h3 className="text-sm font-bold mb-4">Tambah Faction Baru</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Label (Nama Lengkap)</label><input type="text" value={newFaction.label} onChange={e => setNewFaction({...newFaction, label: e.target.value})} placeholder="FBI" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
-                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Short (Prefix in-game)</label><input type="text" value={newFaction.short} onChange={e => setNewFaction({...newFaction, short: e.target.value.toUpperCase()})} placeholder="FBI" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Label (Nama Lengkap)</label><input type="text" value={newFaction.label} onChange={e => setNewFaction({...newFaction, label: e.target.value})} placeholder="BMC" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Short (Prefix in-game)</label><input type="text" value={newFaction.short} onChange={e => setNewFaction({...newFaction, short: e.target.value.toUpperCase()})} placeholder="BMC" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
                   <div>
                     <label className="text-[11px] font-semibold text-muted mb-1 block">Match Type</label>
                     <select value={newFaction.matchType} onChange={e => setNewFaction({...newFaction, matchType: e.target.value})} className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent">
@@ -527,7 +537,16 @@ function Home({ isAdmin, refreshMs, compactMode, tagStyle, onOpenSettings, onOpe
     if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
   }, [activeCat]);
 
-  useEffect(() => { fetch('/api/factions').then(res => res.json()).then(setFactions); }, []);
+  useEffect(() => { 
+    fetch('/api/factions').then(res => res.json()).then(data => {
+      // Gabungkan dengan fallback
+      const merged = [...data];
+      FALLBACK_FACTIONS.forEach(fb => {
+        if (!merged.find((f: any) => f.short === fb.short)) merged.push(fb);
+      });
+      setFactions(merged);
+    }); 
+  }, []);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -695,15 +714,17 @@ function Home({ isAdmin, refreshMs, compactMode, tagStyle, onOpenSettings, onOpe
                       <td className="px-4">
                         <div className="flex items-center gap-2">
                           
-                          {/* PENGATURAN GAYA TAG (PILL vs WIDGET) */}
+                          {/* PENGATURAN GAYA TAG (PILL vs WIDGET SOFT UI) */}
                           {tagStyle === 'pill' ? (
                             <div className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${fac.badge}`}>
                               <span className={`h-1.5 w-1.5 rounded-full ${fac.dot}`} />
                               {fac.short.split(',')[0]}
                             </div>
                           ) : (
-                            <div className={`inline-flex shrink-0 items-center gap-1.5 rounded-[3px] border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shadow-sm ${fac.badge}`}>
-                              <span className={`h-1.5 w-1.5 rounded-sm ${fac.dot}`} />
+                            <div className={`inline-flex shrink-0 items-center gap-2 rounded-[14px] border border-white/5 bg-white/5 px-3 py-1.5 text-[11px] font-semibold shadow-sm backdrop-blur-md ${fac.badge.replace('bg-', 'text-').split(' ')[0]} ${fac.badge}`}>
+                              <span className={`flex h-4 w-4 items-center justify-center rounded-full bg-white/10 ${fac.dot}`}>
+                                <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
+                              </span>
                               {fac.short.split(',')[0]}
                             </div>
                           )}
@@ -790,7 +811,7 @@ function SettingsModal({ open, onClose, currentTheme, currentRefresh, currentCom
             <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Gaya Tag Faction</div>
             <div className="flex rounded-lg border border-line bg-app p-1">
               <button onClick={() => setTagStyle('pill')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${tagStyle === 'pill' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Pill (Bulat)</button>
-              <button onClick={() => setTagStyle('widget')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${tagStyle === 'widget' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Widget (Kotak)</button>
+              <button onClick={() => setTagStyle('widget')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${tagStyle === 'widget' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Widget (Soft Card)</button>
             </div>
           </div>
 
