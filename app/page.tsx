@@ -5,74 +5,169 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 /* ══════════════ Types ══════════════ */
 type Player = { id: number; name: string; ping: number };
 type AiMsg = { role: 'user' | 'assistant'; content: string };
-type ApiData = { ok: boolean; gate: string; online: number; max: number; players: Player[]; updatedAt: string; error?: string; };
+type ApiData = { ok: boolean; gate: string; online: number; max: number; players: Player[]; updatedAt: string; error?: string };
 type AuthStatus = 'LOADING' | 'UNAUTHORIZED' | 'PENDING' | 'APPROVED' | 'ADMIN' | 'BANNED' | 'TIMEOUT';
-type AccessRequest = { id: string; ipAddress: string; deviceId: string; status: string; timeoutUntil: string | null; reason: string | null; lastActive: string; createdAt: string; };
-type AuditLog = { id: string; adminName: string; action: string; targetDeviceId: string; details: string; createdAt: string; };
-type FactionDef = { id: string; label: string; short: string; matchType: string; badge: string; dot: string; };
+type Role = 'SUPER' | 'MOD';
+type AccessRequest = { id: string; ipAddress: string; deviceId: string; status: string; timeoutUntil: string | null; reason: string | null; lastActive: string; createdAt: string };
+type AuditLog = { id: string; adminName: string; action: string; targetDeviceId: string; details: string; createdAt: string };
+type AdminUser = { id: string; deviceId: string; name: string; role: Role };
+type Side = 'GOOD' | 'BAD' | 'NONE';
+type FactionDef = { id: string; label: string; short: string; matchType: string; side?: Side; color?: string | null; badge: string; dot: string };
+type Theme = 'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord';
+type Settings = { theme: Theme; refreshMs: number; compact: boolean; tagStyle: 'pill' | 'widget'; pageSize: number; notifyJoin: boolean; notifyRestart: boolean };
+type EnrichedPlayer = Player & { faction: string; side: Side | 'CIVIL' };
+type SessionRec = { start: number | null; last: number; total: number; count: number };
+type HistoryPoint = { t: number; online: number };
+type ToastItem = { id: number; text: string; kind: 'info' | 'good' | 'bad' | 'watch' };
+type SortKey = 'id' | 'name' | 'ping' | 'session';
+type GroupId = 'ALL' | 'GOOD' | 'BAD' | 'CIVILIAN';
 
-const WARGA: FactionDef = { id: 'WARGA', short: 'Untagged', label: 'Untagged', matchType: 'NONE', badge: 'bg-hover text-muted border-line', dot: 'bg-muted' };
+const DEFAULT_SETTINGS: Settings = { theme: 'dark', refreshMs: 60000, compact: false, tagStyle: 'widget', pageSize: 25, notifyJoin: true, notifyRestart: false };
 
-// Daftar Faction cadangan (jika belum ada di DB)
+const WARGA: FactionDef = {
+  id: 'WARGA', short: 'Civilian', label: 'Civilian', matchType: 'NONE', side: 'NONE',
+  badge: 'bg-slate-500/10 text-slate-400 border-slate-500/20', dot: 'bg-slate-400',
+};
+
+// Faction cadangan (dipakai jika belum ada di DB atau fetch gagal)
 const FALLBACK_FACTIONS: FactionDef[] = [
-  { id: 'bmc', label: 'BMC', short: 'BMC', matchType: 'STARTS_WITH', badge: 'bg-[#2a1a2e] text-[#d89ee8] border-[#4a2555]', dot: 'bg-[#c96ce8]' },
-  { id: 'cbmc', label: 'CBMC', short: 'CBMC', matchType: 'STARTS_WITH', badge: 'bg-[#2e1a2a] text-[#e89ec9] border-[#55254a]', dot: 'bg-[#e86caa]' },
-  { id: 'sin', label: 'Sinister', short: 'SIN', matchType: 'STARTS_WITH', badge: 'bg-[#1a1a1a] text-[#e0e0e0] border-[#333333]', dot: 'bg-[#888888]' },
-  { id: 'mfl', label: 'Mapendos', short: 'MFL', matchType: 'STARTS_WITH', badge: 'bg-[#2a1a15] text-[#e8b08a] border-[#4a2f25]', dot: 'bg-[#d4885c]' },
-  { id: 'dw', label: 'DW', short: 'DW', matchType: 'STARTS_WITH', badge: 'bg-[#1a2a15] text-[#a0e08a] border-[#2f4a25]', dot: 'bg-[#7ac95c]' },
-  { id: 'rsg', label: 'RSG', short: 'RSG', matchType: 'STARTS_WITH', badge: 'bg-[#2a151a] text-[#e08a9e] border-[#4a2530]', dot: 'bg-[#c95c74]' },
-  { id: 'bdf', label: 'BDF', short: 'BDF', matchType: 'STARTS_WITH', badge: 'bg-[#152a2a] text-[#8ae0e0] border-[#254a4a]', dot: 'bg-[#5cc9c9]' },
-  { id: 'gov', label: 'Government', short: 'GOV', matchType: 'INCLUDES', badge: 'bg-[#1a2f35] text-[#82d8d8] border-[#254a55]', dot: 'bg-[#6ac9d8]' },
-  { id: 'una', label: 'UP N Atom', short: 'UNA', matchType: 'STARTS_WITH', badge: 'bg-[#2a152a] text-[#e08ae0] border-[#4a254a]', dot: 'bg-[#c95cc9]' },
-  { id: '969g', label: '969 Garage', short: '969G', matchType: 'STARTS_WITH', badge: 'bg-[#1a1a2a] text-[#8a9ee0] border-[#25254a]', dot: 'bg-[#5c74c9]' },
-  { id: 'rb', label: 'Queen Beach', short: 'RB', matchType: 'STARTS_WITH', badge: 'bg-[#2a1515] text-[#e08a8a] border-[#4a2525]', dot: 'bg-[#c95c5c]' }
+  { id: 'bmc', label: 'BMC', short: 'BMC', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#2a1a2e] text-[#d89ee8] border-[#4a2555]', dot: 'bg-[#c96ce8]' },
+  { id: 'cbmc', label: 'CBMC', short: 'CBMC', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#2e1a2a] text-[#e89ec9] border-[#55254a]', dot: 'bg-[#e86caa]' },
+  { id: 'sin', label: 'Sinister', short: 'SIN', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#1a1a1a] text-[#e0e0e0] border-[#333333]', dot: 'bg-[#888888]' },
+  { id: 'mfl', label: 'Mapendos', short: 'MFL', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#2a1a15] text-[#e8b08a] border-[#4a2f25]', dot: 'bg-[#d4885c]' },
+  { id: 'dw', label: 'DW', short: 'DW', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#1a2a15] text-[#a0e08a] border-[#2f4a25]', dot: 'bg-[#7ac95c]' },
+  { id: 'rsg', label: 'RSG', short: 'RSG', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#2a151a] text-[#e08a9e] border-[#4a2530]', dot: 'bg-[#c95c74]' },
+  { id: 'bdf', label: 'BDF', short: 'BDF', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#152a2a] text-[#8ae0e0] border-[#254a4a]', dot: 'bg-[#5cc9c9]' },
+  { id: 'gov', label: 'Government', short: 'GOV', matchType: 'INCLUDES', side: 'GOOD', badge: 'bg-[#1a2f35] text-[#82d8d8] border-[#254a55]', dot: 'bg-[#6ac9d8]' },
+  { id: 'una', label: 'UP N Atom', short: 'UNA', matchType: 'STARTS_WITH', side: 'GOOD', badge: 'bg-[#2a152a] text-[#e08ae0] border-[#4a254a]', dot: 'bg-[#c95cc9]' },
+  { id: '969g', label: '969 Garage', short: '969G', matchType: 'STARTS_WITH', side: 'GOOD', badge: 'bg-[#1a1a2a] text-[#8a9ee0] border-[#25254a]', dot: 'bg-[#5c74c9]' },
+  { id: 'rb', label: 'Queen Beach', short: 'RB', matchType: 'STARTS_WITH', side: 'GOOD', badge: 'bg-[#2a1515] text-[#e08a8a] border-[#4a2525]', dot: 'bg-[#c95c5c]' },
 ];
 
-// Pengelompokan Faction
+// Fallback pengelompokan jika field `side` di DB kosong / NONE
 const GOOD_SIDE_SHORTS = ['GOV', 'LSPD', 'DOC', 'LSSD', 'MEDIC', 'RH', 'ICR', 'DOJ', '#IME', 'UNA', '969G', 'RB'];
 const BAD_SIDE_SHORTS = ['CC', '4B', 'JRZ', 'HT', 'HTH', 'BURGENK', 'DTF', 'ALLSTAR', 'ALLSTARS', 'NSN', 'WT', '24S', 'OMC', '5TAR', 'MX', 'RCMC', 'RC1', 'BMC', 'CBMC', 'RAGE', 'ALTION', 'NN', 'SIN', 'MFL', 'DW', 'RSG', 'BDF'];
 
+const SESSION_GAP_MS = 15 * 60 * 1000;
+const DAY_MS = 24 * 3600 * 1000;
+
 /* ══════════════ Utils ══════════════ */
-const PAGE_SIZE = 25;
 const fmt = (n: number) => n.toLocaleString('id-ID');
-function pingClass(p: number) { if (p < 80) return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'; if (p < 150) return 'bg-amber-500/10 text-amber-500 border-amber-500/20'; return 'bg-red-500/10 text-red-500 border-red-500/20'; }
-function formatTime(ms: number) { const totalSecs = Math.floor(ms / 1000); const h = Math.floor(totalSecs / 3600); const m = Math.floor((totalSecs % 3600) / 60); const s = totalSecs % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
+const clean = (s: string) => s.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+const GOOD_SET = new Set(GOOD_SIDE_SHORTS.map(clean));
+const BAD_SET = new Set(BAD_SIDE_SHORTS.map(clean));
+
+function pingClass(p: number) {
+  if (p < 80) return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
+  if (p < 150) return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
+  return 'bg-red-500/10 text-red-500 border-red-500/20';
+}
+function formatTime(ms: number) {
+  const totalSecs = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSecs / 3600), m = Math.floor((totalSecs % 3600) / 60), s = totalSecs % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
 function formatDate(iso: string) { return new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }); }
+function fmtDuration(ms: number) {
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return '<1m';
+  const h = Math.floor(m / 60);
+  return h ? `${h}j ${m % 60}m` : `${m}m`;
+}
+function timeAgo(ts: number) {
+  const m = Math.floor((Date.now() - ts) / 60000);
+  if (m < 1) return 'baru saja';
+  if (m < 60) return `${m}m lalu`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}j lalu`;
+  return `${Math.floor(h / 24)}h lalu`;
+}
+function hexA(hex: string, a: number) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return undefined;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+function toCsv(rows: (string | number)[][]) {
+  return rows.map(r => r.map(v => {
+    let s = String(v);
+    if (typeof v === 'string' && /^[=+\-@]/.test(s)) s = `'${s}`; // cegah CSV injection
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }).join(',')).join('\n');
+}
+function downloadCsv(filename: string, content: string) {
+  const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function browserNotify(title: string, body: string) {
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(title, { body });
+  } catch { /* ignore */ }
+}
+function stripThink(text: string) { return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim(); }
 
-// FUNGSI SAKTI: Mendukung koma & mendeteksi dari yang terpanjang (CBMC duluan baru BMC)
-function detectFaction(name: string, factions: FactionDef[]): string {
-  const prefix = name.split(' - ')[0].trim();
-  const cleanPrefix = prefix.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-  const cleanFullName = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+function loadSettings(): Settings {
+  try {
+    const raw = localStorage.getItem('ime-settings');
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  const s = { ...DEFAULT_SETTINGS };
+  const t = localStorage.getItem('ime-theme'); if (t) s.theme = t as Theme;
+  const r = localStorage.getItem('ime-refresh'); if (r) s.refreshMs = Number(r) || s.refreshMs;
+  const c = localStorage.getItem('ime-compact'); if (c) s.compact = c === 'true';
+  const tg = localStorage.getItem('ime-tag-style'); if (tg === 'pill' || tg === 'widget') s.tagStyle = tg;
+  return s;
+}
 
-  const allFactions = [...factions];
-  FALLBACK_FACTIONS.forEach(fb => {
-    if (!allFactions.find(f => f.short === fb.short)) allFactions.push(fb);
-  });
+/* ── Faction helpers ── */
+function mergeFactions(db: FactionDef[]): FactionDef[] {
+  const seen = new Set<string>();
+  db.forEach(f => f.short.split(',').forEach(a => seen.add(clean(a))));
+  return [...db, ...FALLBACK_FACTIONS.filter(fb => !seen.has(clean(fb.short)))];
+}
 
-  const sortedFactions = allFactions.sort((a, b) => b.short.length - a.short.length);
+type Matcher = { alias: string; type: string; id: string };
+function buildMatchers(factions: FactionDef[]): Matcher[] {
+  const list: Matcher[] = [];
+  for (const f of factions) {
+    for (const raw of f.short.split(',')) {
+      const alias = clean(raw);
+      if (alias) list.push({ alias, type: f.matchType, id: f.id });
+    }
+  }
+  return list.sort((a, b) => b.alias.length - a.alias.length);
+}
 
-  for (const f of sortedFactions) {
-    const aliases = f.short.split(',').map(s => s.replace(/[^a-zA-Z0-9]/g, '').toUpperCase());
-    
-    for (const alias of aliases) {
-      if (!alias) continue;
-
-      if (f.matchType === 'STARTS_WITH') {
-        if (cleanPrefix.startsWith(alias)) return f.id;
-        if (!name.includes(' - ') && cleanFullName.startsWith(alias)) return f.id;
-      }
-      if (f.matchType === 'INCLUDES') {
-        if (cleanPrefix.includes(alias)) return f.id;
-        if (!name.includes(' - ') && cleanFullName.includes(alias)) return f.id;
-      }
+function detectFaction(name: string, matchers: Matcher[]): string {
+  const hasSep = name.includes(' - ');
+  const cleanPrefix = clean(name.split(' - ')[0].trim());
+  const cleanFull = clean(name);
+  for (const m of matchers) {
+    if (m.type === 'STARTS_WITH') {
+      if (cleanPrefix.startsWith(m.alias)) return m.id;
+      if (!hasSep && cleanFull.startsWith(m.alias)) return m.id;
+    } else if (m.type === 'INCLUDES') {
+      if (cleanPrefix.includes(m.alias)) return m.id;
+      if (!hasSep && cleanFull.includes(m.alias)) return m.id;
     }
   }
   return 'WARGA';
 }
 
+function resolveSide(f?: FactionDef): Side {
+  if (!f) return 'NONE';
+  if (f.side === 'GOOD' || f.side === 'BAD') return f.side;
+  const aliases = f.short.split(',').map(clean);
+  if (aliases.some(a => GOOD_SET.has(a))) return 'GOOD';
+  if (aliases.some(a => BAD_SET.has(a))) return 'BAD';
+  return 'NONE';
+}
+
 function renderMarkdown(text: string) {
-  const cleanText = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  const cleanText = stripThink(text);
   return cleanText.split('\n').map((line, i) => {
     const parseBold = (str: string) => str.split(/(\*\*.*?\*\*)/g).map((part, j) => part.startsWith('**') && part.endsWith('**') ? <strong key={j} className="font-semibold text-accent">{part.slice(2, -2)}</strong> : part);
     if (line.startsWith('### ') || line.startsWith('## ') || line.startsWith('# ')) { const level = line.match(/^#+/)?.[0].length || 1; return <div key={i} className={`font-semibold text-main mt-3 mb-1 ${level === 1 ? 'text-base' : 'text-sm'}`}>{line.replace(/^#+\s+/, '')}</div>; }
@@ -85,45 +180,31 @@ function renderMarkdown(text: string) {
 /* ══════════════ Main App Component ══════════════ */
 export default function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>('LOADING');
+  const [role, setRole] = useState<Role>('SUPER');
   const [deviceId, setDeviceId] = useState<string>('');
   const [authMeta, setAuthMeta] = useState<{ timeoutUntil?: string; reason?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [isBlurred, setIsBlurred] = useState(false);
-
-  const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
-  const [refreshMs, setRefreshMs] = useState(60000);
-  const [compactMode, setCompactMode] = useState(false);
-  const [tagStyle, setTagStyle] = useState<'pill' | 'widget'>('widget');
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
 
   useEffect(() => {
     let id = localStorage.getItem('ime-device-id');
     if (!id) { id = crypto.randomUUID(); localStorage.setItem('ime-device-id', id); }
     setDeviceId(id);
-
-    const savedTheme = localStorage.getItem('ime-theme') as any;
-    if (savedTheme) setTheme(savedTheme);
-    const savedRefresh = localStorage.getItem('ime-refresh');
-    if (savedRefresh) setRefreshMs(Number(savedRefresh));
-    const savedCompact = localStorage.getItem('ime-compact');
-    if (savedCompact) setCompactMode(savedCompact === 'true');
-    const savedTag = localStorage.getItem('ime-tag-style') as any;
-    if (savedTag) setTagStyle(savedTag);
+    setSettings(loadSettings());
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('ime-theme', theme);
-    document.documentElement.setAttribute('data-theme', theme);
-  }, [theme]);
+    document.documentElement.setAttribute('data-theme', settings.theme);
+  }, [settings.theme]);
 
-  const handleSaveSettings = (newTheme: any, newRefresh: number, newCompact: boolean, newTag: 'pill' | 'widget') => {
-    setTheme(newTheme);
-    setRefreshMs(newRefresh);
-    setCompactMode(newCompact);
-    setTagStyle(newTag);
-    localStorage.setItem('ime-refresh', String(newRefresh));
-    localStorage.setItem('ime-compact', String(newCompact));
-    localStorage.setItem('ime-tag-style', newTag);
+  const handleSaveSettings = (s: Settings) => {
+    setSettings(s);
+    localStorage.setItem('ime-settings', JSON.stringify(s));
+    if (s.notifyRestart && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
     setSettingsOpen(false);
   };
 
@@ -134,6 +215,7 @@ export default function App() {
         const res = await fetch(`/api/auth/status?deviceId=${deviceId}`);
         const json = await res.json();
         setAuthStatus(json.status);
+        setRole(json.role === 'MOD' ? 'MOD' : 'SUPER');
         setAuthMeta({ timeoutUntil: json.timeoutUntil, reason: json.reason });
       } catch { setAuthStatus('UNAUTHORIZED'); }
     };
@@ -142,16 +224,16 @@ export default function App() {
     return () => clearInterval(interval);
   }, [deviceId]);
 
-  // ANTI-SCREENSHOT LOGIC (MOBILE SAFE)
+  // ANTI-SCREENSHOT LOGIC
   useEffect(() => {
-    const handleVisibilityChange = () => { 
-      if (document.hidden) setIsBlurred(true); 
-      else setTimeout(() => setIsBlurred(false), 300); 
+    const handleVisibilityChange = () => {
+      if (document.hidden) setIsBlurred(true);
+      else setTimeout(() => setIsBlurred(false), 300);
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && ['p', 's', 'u'].includes(e.key.toLowerCase())) e.preventDefault();
       if (e.key === 'PrintScreen') {
-        navigator.clipboard.writeText('⚠️ Screenshot dilarang!');
+        navigator.clipboard.writeText('⚠️ Screenshot dilarang!').catch(() => {});
         setIsBlurred(true);
         setTimeout(() => setIsBlurred(false), 2000);
       }
@@ -186,40 +268,32 @@ export default function App() {
   return (
     <div className="relative min-h-screen bg-app text-main overflow-hidden">
       <div className={`transition-all duration-300 ease-out ${isBlurred ? 'blur-[30px] scale-[0.95] opacity-10 pointer-events-none' : ''}`}>
-        <Home 
-          isAdmin={authStatus === 'ADMIN'} 
-          refreshMs={refreshMs} 
-          compactMode={compactMode}
-          tagStyle={tagStyle}
-          onOpenSettings={() => setSettingsOpen(true)} 
-          onOpenAdmin={() => setAdminOpen(true)} 
+        <Home
+          isAdmin={authStatus === 'ADMIN'}
+          settings={settings}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenAdmin={() => setAdminOpen(true)}
         />
-        {authStatus === 'ADMIN' && <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />}
+        {authStatus === 'ADMIN' && <AdminPanel open={adminOpen} role={role} onClose={() => setAdminOpen(false)} />}
       </div>
-      <SettingsModal 
-        open={settingsOpen} 
-        onClose={() => setSettingsOpen(false)} 
-        currentTheme={theme}
-        currentRefresh={refreshMs}
-        currentCompact={compactMode}
-        currentTag={tagStyle}
-        onSave={handleSaveSettings}
-      />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} current={settings} onSave={handleSaveSettings} />
     </div>
   );
 }
 
 /* ══════════════ Lock Screen ══════════════ */
-function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, status: string, meta: any, onRefresh: () => void }) {
+function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string; status: string; meta: any; onRefresh: () => void }) {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  
+
   const requestAccess = async () => {
     setLoading(true); setErrorMsg('');
-    const res = await fetch('/api/auth/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId }) });
-    if (res.status === 429) { const data = await res.json(); setErrorMsg(data.error); } 
-    else { onRefresh(); }
-    setLoading(false); 
+    try {
+      const res = await fetch('/api/auth/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId }) });
+      if (res.status === 429) { const data = await res.json(); setErrorMsg(data.error); }
+      else { onRefresh(); }
+    } catch { setErrorMsg('Gagal menghubungi server.'); }
+    setLoading(false);
   };
 
   return (
@@ -230,16 +304,16 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, s
             {status === 'BANNED' || status === 'TIMEOUT' ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /> : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />}
           </svg>
         </div>
-        
+
         <h1 className="text-xl font-bold">
           {status === 'BANNED' ? 'Akses Diblokir' : status === 'TIMEOUT' ? 'Akses Ditangguhkan' : 'Akses Terkunci'}
         </h1>
-        
+
         <p className="mt-2 text-sm text-muted">
           {status === 'BANNED' ? 'Kamu telah melanggar aturan dan dilarang mengakses web ini.' :
-           status === 'TIMEOUT' ? 'Akses kamu ditangguhkan sementara.' :
-           status === 'PENDING' ? '⏳ Menunggu Hans (Admin) menyetujui permintaan akses kamu.' :
-           'Website ini bersifat privat. Kamu harus meminta izin akses dari Admin Hans terlebih dahulu.'}
+            status === 'TIMEOUT' ? 'Akses kamu ditangguhkan sementara.' :
+              status === 'PENDING' ? '⏳ Menunggu Hans (Admin) menyetujui permintaan akses kamu.' :
+                'Website ini bersifat privat. Kamu harus meminta izin akses dari Admin Hans terlebih dahulu.'}
         </p>
 
         {(status === 'BANNED' || status === 'TIMEOUT') && (
@@ -247,7 +321,7 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, s
             <div className="text-xs font-semibold uppercase text-red-400">Alasan:</div>
             <div className="mt-1 text-sm text-red-200">{meta?.reason || 'Tidak ada alasan spesifik.'}</div>
             {status === 'TIMEOUT' && meta?.timeoutUntil && (
-              <div className="mt-3 text-xs text-red-300">Dibuka kembali pada: <br/><span className="font-mono font-bold text-red-200">{new Date(meta.timeoutUntil).toLocaleString('id-ID')}</span></div>
+              <div className="mt-3 text-xs text-red-300">Dibuka kembali pada: <br /><span className="font-mono font-bold text-red-200">{new Date(meta.timeoutUntil).toLocaleString('id-ID')}</span></div>
             )}
           </div>
         )}
@@ -264,29 +338,74 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, s
   );
 }
 
+/* ══════════════ Faction Tag ══════════════ */
+function FactionTag({ fac, variant }: { fac: Pick<FactionDef, 'badge' | 'dot' | 'short' | 'color'>; variant: 'pill' | 'widget' }) {
+  const label = fac.short.split(',')[0];
+  const custom = fac.color && hexA(fac.color, 1) ? fac.color : null;
+  const boxStyle = custom ? { backgroundColor: hexA(custom, 0.15), color: custom, borderColor: hexA(custom, 0.35) } : undefined;
+  const dotStyle = custom ? { backgroundColor: custom } : undefined;
+  const boxCls = custom ? '' : fac.badge;
+  const dotCls = custom ? '' : fac.dot;
+
+  if (variant === 'pill') {
+    return (
+      <div className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${boxCls}`} style={boxStyle}>
+        <span className={`h-1.5 w-1.5 rounded-full ${dotCls}`} style={dotStyle} />
+        {label}
+      </div>
+    );
+  }
+  return (
+    <div className={`inline-flex shrink-0 items-center gap-2 rounded-[14px] border px-3 py-1.5 text-[11px] font-semibold shadow-sm backdrop-blur-md ${boxCls}`} style={boxStyle}>
+      <span className={`flex h-4 w-4 items-center justify-center rounded-full ${dotCls}`} style={dotStyle}>
+        <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
+      </span>
+      {label}
+    </div>
+  );
+}
+
 /* ══════════════ Admin Panel ══════════════ */
-function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
-  const [activeTab, setActiveTab] = useState<'requests' | 'factions' | 'audit'>('requests');
+type FactionForm = { id?: string; label: string; short: string; matchType: string; side: Side; color: string; badge: string; dot: string };
+const EMPTY_FORM: FactionForm = { label: '', short: '', matchType: 'INCLUDES', side: 'NONE', color: '#8b5cf6', badge: 'bg-gray-500/10 text-gray-500 border-gray-500/20', dot: 'bg-gray-500' };
+
+function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => void; role: Role }) {
+  const isSuper = role === 'SUPER';
+  const [activeTab, setActiveTab] = useState<'requests' | 'factions' | 'audit' | 'admins'>('requests');
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('ALL');
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [actionModal, setActionModal] = useState<{ type: 'BAN' | 'TIMEOUT', id?: string } | null>(null);
+  const [actionModal, setActionModal] = useState<{ type: 'BAN' | 'TIMEOUT'; id?: string } | null>(null);
   const [reasonInput, setReasonInput] = useState('');
   const [durationInput, setDurationInput] = useState('60');
+  const [expireHours, setExpireHours] = useState('72');
   const [factions, setFactions] = useState<FactionDef[]>([]);
-  const [newFaction, setNewFaction] = useState({ label: '', short: '', matchType: 'INCLUDES', badge: 'bg-gray-500/10 text-gray-500 border-gray-500/20', dot: 'bg-gray-500' });
+  const [form, setForm] = useState<FactionForm>(EMPTY_FORM);
   const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [logAdmin, setLogAdmin] = useState('ALL');
+  const [logFrom, setLogFrom] = useState('');
+  const [logTo, setLogTo] = useState('');
+  const [logText, setLogText] = useState('');
+  const [admins, setAdmins] = useState<AdminUser[]>([]);
+  const [newAdmin, setNewAdmin] = useState<{ name: string; deviceId: string; role: Role }>({ name: '', deviceId: '', role: 'MOD' });
 
   const fetchData = useCallback(async () => {
-    if (activeTab === 'requests') { const res = await fetch('/api/admin/requests'); if (res.ok) setRequests(await res.json()); } 
-    else if (activeTab === 'audit') { const res = await fetch('/api/admin/audit'); if (res.ok) setLogs(await res.json()); } 
-    else if (activeTab === 'factions') { const res = await fetch('/api/factions'); if (res.ok) setFactions(await res.json()); }
+    try {
+      if (activeTab === 'requests') { const res = await fetch('/api/admin/requests'); if (res.ok) setRequests(await res.json()); }
+      else if (activeTab === 'audit') { const res = await fetch('/api/admin/audit'); if (res.ok) setLogs(await res.json()); }
+      else if (activeTab === 'factions') { const res = await fetch('/api/factions'); if (res.ok) setFactions(await res.json()); }
+      else if (activeTab === 'admins') { const res = await fetch('/api/admin/admins'); if (res.ok) setAdmins(await res.json()); }
+    } catch { /* abaikan, coba lagi di interval berikutnya */ }
   }, [activeTab]);
 
-  useEffect(() => { 
-    if (open) { fetchData(); const int = setInterval(fetchData, 5000); return () => clearInterval(int); } 
-  }, [open, fetchData]);
+  useEffect(() => {
+    if (!open) return;
+    fetchData();
+    // Tab form faction tidak di-refresh otomatis supaya tidak mengganggu pengetikan
+    const int = setInterval(() => { if (activeTab !== 'factions') fetchData(); }, 5000);
+    return () => clearInterval(int);
+  }, [open, fetchData, activeTab]);
 
   const executeAction = async (id: string, action: string, reason?: string, durationMinutes?: number) => {
     await fetch('/api/admin/requests', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action, reason, durationMinutes }) });
@@ -300,16 +419,41 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
     setSelected(new Set()); fetchData();
   };
 
-  const addFaction = async () => {
-    if (!newFaction.label || !newFaction.short) return;
-    await fetch('/api/factions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newFaction) });
-    setNewFaction({ label: '', short: '', matchType: 'INCLUDES', badge: 'bg-gray-500/10 text-gray-500 border-gray-500/20', dot: 'bg-gray-500' });
+  const expirePending = async () => {
+    if (!confirm(`Hapus semua request PENDING yang lebih lama dari ${expireHours} jam?`)) return;
+    await fetch('/api/admin/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'EXPIRE_PENDING', olderThanHours: Number(expireHours) }) });
     fetchData();
+  };
+
+  const saveFaction = async () => {
+    if (!form.label.trim() || !form.short.trim()) return;
+    const res = await fetch('/api/factions', { method: form.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+    if (!res.ok) { alert('Gagal menyimpan faction.'); return; }
+    setForm(EMPTY_FORM); fetchData();
+  };
+
+  const startEdit = (f: FactionDef) => {
+    setForm({ id: f.id, label: f.label, short: f.short, matchType: f.matchType, side: f.side ?? 'NONE', color: f.color || '#8b5cf6', badge: f.badge, dot: f.dot });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const deleteFaction = async (id: string) => {
     if (!confirm('Hapus faction ini?')) return;
-    await fetch(`/api/factions?id=${id}`, { method: 'DELETE' }); fetchData();
+    await fetch(`/api/factions?id=${id}`, { method: 'DELETE' });
+    if (form.id === id) setForm(EMPTY_FORM);
+    fetchData();
+  };
+
+  const addAdmin = async () => {
+    if (!newAdmin.name.trim() || !newAdmin.deviceId.trim()) return;
+    const res = await fetch('/api/admin/admins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newAdmin) });
+    if (!res.ok) { alert('Gagal menambah admin.'); return; }
+    setNewAdmin({ name: '', deviceId: '', role: 'MOD' }); fetchData();
+  };
+
+  const removeAdmin = async (id: string) => {
+    if (!confirm('Cabut akses admin ini?')) return;
+    await fetch(`/api/admin/admins?id=${id}`, { method: 'DELETE' }); fetchData();
   };
 
   const toggleSelect = (id: string) => {
@@ -324,7 +468,31 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
     return matchSearch && matchFilter;
   });
 
+  const adminNames = useMemo(() => Array.from(new Set(logs.map(l => l.adminName))), [logs]);
+  const filteredLogs = useMemo(() => {
+    const q = logText.trim().toLowerCase();
+    return logs.filter(l => {
+      const d = new Date(l.createdAt);
+      if (logAdmin !== 'ALL' && l.adminName !== logAdmin) return false;
+      if (logFrom && d < new Date(`${logFrom}T00:00:00`)) return false;
+      if (logTo && d > new Date(`${logTo}T23:59:59`)) return false;
+      if (q && !`${l.action} ${l.targetDeviceId} ${l.details}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [logs, logAdmin, logFrom, logTo, logText]);
+
+  const exportLogs = () => {
+    const rows: (string | number)[][] = [['Waktu', 'Admin', 'Aksi', 'Target', 'Detail']];
+    filteredLogs.forEach(l => rows.push([formatDate(l.createdAt), l.adminName, l.action, l.targetDeviceId, l.details || '']));
+    downloadCsv(`audit-log-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(rows));
+  };
+
   if (!open) return null;
+
+  const tabs: { id: typeof activeTab; label: string }[] = [
+    { id: 'requests', label: 'Users' },
+    ...(isSuper ? [{ id: 'factions' as const, label: 'Factions' }, { id: 'audit' as const, label: 'Logs' }, { id: 'admins' as const, label: 'Admins' }] : []),
+  ];
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-app">
@@ -334,13 +502,14 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-500">
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
             </span>Admin Center
+            <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${isSuper ? 'bg-emerald-500/20 text-emerald-500' : 'bg-blue-500/20 text-blue-500'}`}>{isSuper ? 'SUPER ADMIN' : 'MODERATOR'}</span>
           </h1>
         </div>
         <div className="mt-4 flex items-center gap-2 sm:mt-0">
           <div className="flex rounded-lg border border-line bg-app p-1">
-            <button onClick={() => setActiveTab('requests')} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${activeTab === 'requests' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Users</button>
-            <button onClick={() => setActiveTab('factions')} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${activeTab === 'factions' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Factions</button>
-            <button onClick={() => setActiveTab('audit')} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${activeTab === 'audit' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Logs</button>
+            {tabs.map(t => (
+              <button key={t.id} onClick={() => setActiveTab(t.id)} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${activeTab === t.id ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>{t.label}</button>
+            ))}
           </div>
           <button onClick={onClose} className="rounded-lg bg-hover px-4 py-2 text-sm font-medium hover:bg-line transition">Tutup</button>
         </div>
@@ -360,6 +529,14 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
                   <button onClick={() => executeBulk('BAN')} disabled={selected.size === 0} className="rounded-lg bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-500 hover:bg-red-500/20 disabled:opacity-30">Ban Selected ({selected.size})</button>
                 </div>
                 <input type="text" placeholder="Cari IP / Device ID..." value={search} onChange={e => setSearch(e.target.value)} className="w-full rounded-lg border border-line bg-card px-4 py-2 text-sm outline-none focus:border-accent sm:w-64" />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-card px-4 py-3 text-xs text-muted">
+                <span>Bersihkan request PENDING yang lebih lama dari</span>
+                <select value={expireHours} onChange={e => setExpireHours(e.target.value)} className="rounded-md border border-line bg-app px-2 py-1 text-main outline-none">
+                  <option value="24">24 jam</option><option value="72">3 hari</option><option value="168">7 hari</option><option value="720">30 hari</option>
+                </select>
+                <button onClick={expirePending} className="rounded-md bg-orange-500/10 px-3 py-1.5 font-semibold text-orange-500 hover:bg-orange-500/20">Bersihkan</button>
               </div>
 
               <div className="rounded-xl border border-line bg-card overflow-hidden">
@@ -391,19 +568,20 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
                             <td className="px-4 py-4">
                               <div className="font-medium text-main">{r.ipAddress}</div>
                               <div className="font-mono text-[11px] text-subtle mt-0.5">{r.deviceId}</div>
+                              <div className="text-[10px] text-subtle mt-0.5">Diminta: {formatDate(r.createdAt)}</div>
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex flex-wrap items-center gap-1.5">
                                 {r.status === 'BANNED' ? <button onClick={() => executeAction(r.id, 'REVOKE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-2 py-1 rounded text-[11px] font-medium">Unban</button>
-                                : isTimeout ? <button onClick={() => executeAction(r.id, 'CLEAR_TIMEOUT')} className="bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 px-2 py-1 rounded text-[11px] font-medium">Hapus TO</button>
-                                : (
-                                  <>
-                                    {r.status !== 'APPROVED' && <button onClick={() => executeAction(r.id, 'APPROVE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-2 py-1 rounded text-[11px] font-medium">ACC</button>}
-                                    {r.status === 'APPROVED' && <button onClick={() => executeAction(r.id, 'REVOKE')} className="bg-hover text-muted hover:text-main px-2 py-1 rounded text-[11px] font-medium">Revoke</button>}
-                                    <button onClick={() => { setActionModal({ type: 'TIMEOUT', id: r.id }); setReasonInput(''); setDurationInput('60'); }} className="text-orange-500 hover:bg-orange-500/10 px-2 py-1 rounded text-[11px] font-medium border border-transparent">Timeout</button>
-                                    <button onClick={() => { setActionModal({ type: 'BAN', id: r.id }); setReasonInput(''); }} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-[11px] font-medium border border-transparent">Ban</button>
-                                  </>
-                                )}
+                                  : isTimeout ? <button onClick={() => executeAction(r.id, 'CLEAR_TIMEOUT')} className="bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 px-2 py-1 rounded text-[11px] font-medium">Hapus TO</button>
+                                    : (
+                                      <>
+                                        {r.status !== 'APPROVED' && <button onClick={() => executeAction(r.id, 'APPROVE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-2 py-1 rounded text-[11px] font-medium">ACC</button>}
+                                        {r.status === 'APPROVED' && <button onClick={() => executeAction(r.id, 'REVOKE')} className="bg-hover text-muted hover:text-main px-2 py-1 rounded text-[11px] font-medium">Revoke</button>}
+                                        <button onClick={() => { setActionModal({ type: 'TIMEOUT', id: r.id }); setReasonInput(''); setDurationInput('60'); }} className="text-orange-500 hover:bg-orange-500/10 px-2 py-1 rounded text-[11px] font-medium border border-transparent">Timeout</button>
+                                        <button onClick={() => { setActionModal({ type: 'BAN', id: r.id }); setReasonInput(''); }} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-[11px] font-medium border border-transparent">Ban</button>
+                                      </>
+                                    )}
                               </div>
                             </td>
                           </tr>
@@ -416,67 +594,144 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
             </>
           )}
 
-          {activeTab === 'factions' && (
+          {activeTab === 'factions' && isSuper && (
             <div className="space-y-6">
               <div className="rounded-xl border border-line bg-card p-5">
-                <h3 className="text-sm font-bold mb-4">Tambah Faction Baru</h3>
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-sm font-bold">{form.id ? `Edit Faction: ${form.label}` : 'Tambah Faction Baru'}</h3>
+                  {form.id && <button onClick={() => setForm(EMPTY_FORM)} className="text-xs text-muted hover:text-main">Batal edit</button>}
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Label (Nama Lengkap)</label><input type="text" value={newFaction.label} onChange={e => setNewFaction({...newFaction, label: e.target.value})} placeholder="BMC" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
-                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Short (Prefix in-game)</label><input type="text" value={newFaction.short} onChange={e => setNewFaction({...newFaction, short: e.target.value.toUpperCase()})} placeholder="BMC" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Label (Nama Lengkap)</label><input type="text" value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} placeholder="Government" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Short (pisahkan koma untuk alias)</label><input type="text" value={form.short} onChange={e => setForm({ ...form, short: e.target.value.toUpperCase() })} placeholder="GOV,PEMKOT" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
                   <div>
                     <label className="text-[11px] font-semibold text-muted mb-1 block">Match Type</label>
-                    <select value={newFaction.matchType} onChange={e => setNewFaction({...newFaction, matchType: e.target.value})} className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent">
+                    <select value={form.matchType} onChange={e => setForm({ ...form, matchType: e.target.value })} className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent">
                       <option value="INCLUDES">INCLUDES (Mengandung)</option><option value="STARTS_WITH">STARTS_WITH (Diawali)</option>
                     </select>
                   </div>
-                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Badge Tailwind</label><input type="text" value={newFaction.badge} onChange={e => setNewFaction({...newFaction, badge: e.target.value})} placeholder="bg-blue-500/10 text-blue-500 border-blue-500/20" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
-                  <div><label className="text-[11px] font-semibold text-muted mb-1 block">Dot Tailwind</label><input type="text" value={newFaction.dot} onChange={e => setNewFaction({...newFaction, dot: e.target.value})} placeholder="bg-blue-500" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
-                  <div className="flex items-end"><button onClick={addFaction} className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover transition">Tambah Faction</button></div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted mb-1 block">Kelompok (Side)</label>
+                    <select value={form.side} onChange={e => setForm({ ...form, side: e.target.value as Side })} className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent">
+                      <option value="NONE">Otomatis / Tidak ada</option><option value="GOOD">Good Side</option><option value="BAD">Bad Side</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted mb-1 block">Warna</label>
+                    <div className="flex items-center gap-2">
+                      <input type="color" value={form.color} onChange={e => setForm({ ...form, color: e.target.value })} className="h-9 w-12 cursor-pointer rounded-md border border-line bg-app p-0.5" />
+                      <input type="text" value={form.color} onChange={e => setForm({ ...form, color: e.target.value })} className="w-full rounded-lg border border-line bg-app px-3 py-2 font-mono text-sm text-main outline-none focus:border-accent" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted mb-1 block">Preview</label>
+                    <div className="flex items-center gap-3 rounded-lg border border-line bg-app px-3 py-1.5">
+                      <FactionTag fac={{ short: form.short || 'TAG', badge: form.badge, dot: form.dot, color: form.color }} variant="pill" />
+                      <FactionTag fac={{ short: form.short || 'TAG', badge: form.badge, dot: form.dot, color: form.color }} variant="widget" />
+                    </div>
+                  </div>
+                </div>
+                <details className="mt-4 text-xs text-muted">
+                  <summary className="cursor-pointer select-none hover:text-main">Lanjutan: class Tailwind manual (dipakai jika warna kosong)</summary>
+                  <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <input type="text" value={form.badge} onChange={e => setForm({ ...form, badge: e.target.value })} placeholder="bg-blue-500/10 text-blue-500 border-blue-500/20" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
+                    <input type="text" value={form.dot} onChange={e => setForm({ ...form, dot: e.target.value })} placeholder="bg-blue-500" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
+                  </div>
+                </details>
+                <div className="mt-4 flex justify-end">
+                  <button onClick={saveFaction} className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover transition">{form.id ? 'Simpan Perubahan' : 'Tambah Faction'}</button>
                 </div>
               </div>
               <div className="rounded-xl border border-line bg-card overflow-hidden">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
-                    <tr><th className="px-4 py-3">Label</th><th className="px-4 py-3">Short</th><th className="px-4 py-3">Match Type</th><th className="px-4 py-3">Preview</th><th className="px-4 py-3 text-right">Aksi</th></tr>
-                  </thead>
-                  <tbody>
-                    {factions.map(f => (
-                      <tr key={f.id} className="border-t border-line hover:bg-hover/50 transition">
-                        <td className="px-4 py-3 font-medium text-main">{f.label}</td>
-                        <td className="px-4 py-3 font-mono text-muted">{f.short}</td>
-                        <td className="px-4 py-3 text-xs text-subtle">{f.matchType}</td>
-                        <td className="px-4 py-3">
-                          <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${f.badge}`}>
-                            <span className={`h-1.5 w-1.5 rounded-full ${f.dot}`} />
-                            {f.short.split(',')[0]}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-right"><button onClick={() => deleteFaction(f.id)} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-xs font-medium transition">Hapus</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
+                      <tr><th className="px-4 py-3">Label</th><th className="px-4 py-3">Short</th><th className="px-4 py-3">Match</th><th className="px-4 py-3">Side</th><th className="px-4 py-3">Preview</th><th className="px-4 py-3 text-right">Aksi</th></tr>
+                    </thead>
+                    <tbody>
+                      {factions.map(f => (
+                        <tr key={f.id} className="border-t border-line hover:bg-hover/50 transition">
+                          <td className="px-4 py-3 font-medium text-main">{f.label}</td>
+                          <td className="px-4 py-3 font-mono text-muted">{f.short}</td>
+                          <td className="px-4 py-3 text-xs text-subtle">{f.matchType}</td>
+                          <td className="px-4 py-3 text-xs"><span className={f.side === 'GOOD' ? 'text-emerald-500' : f.side === 'BAD' ? 'text-red-500' : 'text-subtle'}>{f.side && f.side !== 'NONE' ? f.side : 'auto'}</span></td>
+                          <td className="px-4 py-3"><FactionTag fac={f} variant="pill" /></td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            <button onClick={() => startEdit(f)} className="text-accent hover:bg-accent/10 px-2 py-1 rounded text-xs font-medium transition">Edit</button>
+                            <button onClick={() => deleteFaction(f.id)} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-xs font-medium transition">Hapus</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
 
-          {activeTab === 'audit' && (
-            <div className="rounded-xl border border-line bg-card overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left whitespace-nowrap">
-                  <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
-                    <tr><th className="px-4 py-3">Waktu</th><th className="px-4 py-3">Admin</th><th className="px-4 py-3">Aksi</th><th className="px-4 py-3">Target</th><th className="px-4 py-3">Detail</th></tr>
-                  </thead>
+          {activeTab === 'audit' && isSuper && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-end gap-3 rounded-xl border border-line bg-card p-4">
+                <div><label className="mb-1 block text-[11px] font-semibold text-muted">Admin</label>
+                  <select value={logAdmin} onChange={e => setLogAdmin(e.target.value)} className="rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent">
+                    <option value="ALL">Semua</option>{adminNames.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select></div>
+                <div><label className="mb-1 block text-[11px] font-semibold text-muted">Dari</label><input type="date" value={logFrom} onChange={e => setLogFrom(e.target.value)} className="rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                <div><label className="mb-1 block text-[11px] font-semibold text-muted">Sampai</label><input type="date" value={logTo} onChange={e => setLogTo(e.target.value)} className="rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                <div className="min-w-[160px] flex-1"><label className="mb-1 block text-[11px] font-semibold text-muted">Cari</label><input type="text" value={logText} onChange={e => setLogText(e.target.value)} placeholder="aksi / target / detail" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" /></div>
+                <button onClick={exportLogs} disabled={filteredLogs.length === 0} className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover disabled:opacity-40"><DownloadIcon className="h-4 w-4" />Ekspor CSV ({filteredLogs.length})</button>
+              </div>
+              <div className="rounded-xl border border-line bg-card overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left whitespace-nowrap">
+                    <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
+                      <tr><th className="px-4 py-3">Waktu</th><th className="px-4 py-3">Admin</th><th className="px-4 py-3">Aksi</th><th className="px-4 py-3">Target</th><th className="px-4 py-3">Detail</th></tr>
+                    </thead>
+                    <tbody>
+                      {filteredLogs.map(l => (
+                        <tr key={l.id} className="border-t border-line hover:bg-hover/50 transition">
+                          <td className="px-4 py-3 text-muted text-xs">{formatDate(l.createdAt)}</td>
+                          <td className="px-4 py-3 font-medium text-main">{l.adminName}</td>
+                          <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-hover text-main border border-line">{l.action}</span></td>
+                          <td className="px-4 py-3 font-mono text-[11px] text-subtle">{l.targetDeviceId}</td>
+                          <td className="px-4 py-3 text-muted text-xs">{l.details || '-'}</td>
+                        </tr>
+                      ))}
+                      {filteredLogs.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-subtle">Tidak ada log.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'admins' && isSuper && (
+            <div className="space-y-6">
+              <div className="rounded-xl border border-line bg-card p-5">
+                <h3 className="mb-4 text-sm font-bold">Tambah Admin / Moderator</h3>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+                  <input type="text" value={newAdmin.name} onChange={e => setNewAdmin({ ...newAdmin, name: e.target.value })} placeholder="Nama" className="rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
+                  <input type="text" value={newAdmin.deviceId} onChange={e => setNewAdmin({ ...newAdmin, deviceId: e.target.value })} placeholder="Device ID" className="rounded-lg border border-line bg-app px-3 py-2 font-mono text-sm text-main outline-none focus:border-accent sm:col-span-2" />
+                  <select value={newAdmin.role} onChange={e => setNewAdmin({ ...newAdmin, role: e.target.value as Role })} className="rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent">
+                    <option value="MOD">Moderator</option><option value="SUPER">Super Admin</option>
+                  </select>
+                </div>
+                <div className="mt-4 flex justify-end"><button onClick={addAdmin} className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover">Tambah</button></div>
+                <p className="mt-2 text-[11px] text-subtle">Moderator hanya bisa mengelola user (ACC / timeout / ban). Faction, log, dan admin hanya untuk Super Admin.</p>
+              </div>
+              <div className="rounded-xl border border-line bg-card overflow-hidden">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs"><tr><th className="px-4 py-3">Nama</th><th className="px-4 py-3">Device ID</th><th className="px-4 py-3">Role</th><th className="px-4 py-3 text-right">Aksi</th></tr></thead>
                   <tbody>
-                    {logs.map(l => (
-                      <tr key={l.id} className="border-t border-line hover:bg-hover/50 transition">
-                        <td className="px-4 py-3 text-muted text-xs">{formatDate(l.createdAt)}</td>
-                        <td className="px-4 py-3 font-medium text-main">{l.adminName}</td>
-                        <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-hover text-main border border-line">{l.action}</span></td>
-                        <td className="px-4 py-3 font-mono text-[11px] text-subtle">{l.targetDeviceId}</td>
-                        <td className="px-4 py-3 text-muted text-xs">{l.details || '-'}</td>
+                    {admins.map(a => (
+                      <tr key={a.id} className="border-t border-line hover:bg-hover/50">
+                        <td className="px-4 py-3 font-medium text-main">{a.name}</td>
+                        <td className="px-4 py-3 font-mono text-[11px] text-subtle">{a.deviceId}</td>
+                        <td className="px-4 py-3"><span className={`rounded px-2 py-0.5 text-[10px] font-bold ${a.role === 'SUPER' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-blue-500/20 text-blue-500'}`}>{a.role}</span></td>
+                        <td className="px-4 py-3 text-right"><button onClick={() => removeAdmin(a.id)} className="rounded px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-500/10">Cabut</button></td>
                       </tr>
                     ))}
+                    {admins.length === 0 && <tr><td colSpan={4} className="px-4 py-10 text-center text-subtle">Belum ada data.</td></tr>}
                   </tbody>
                 </table>
               </div>
@@ -510,153 +765,473 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
   );
 }
 
+/* ══════════════ Online Chart (SVG, tanpa dependency) ══════════════ */
+function OnlineChart({ points }: { points: HistoryPoint[] }) {
+  const [hover, setHover] = useState<number | null>(null);
+
+  if (points.length < 2) {
+    return <div className="py-8 text-center text-xs text-subtle">Data tren masih dikumpulkan… biarkan halaman terbuka beberapa menit.</div>;
+  }
+
+  const W = 600, H = 140, P = 8;
+  const t0 = points[0].t, t1 = points[points.length - 1].t;
+  const span = Math.max(t1 - t0, 1);
+  const maxV = Math.max(...points.map(p => p.online), 1);
+  const minV = Math.min(...points.map(p => p.online));
+  const top = Math.ceil(maxV * 1.1);
+  const avg = Math.round(points.reduce((a, p) => a + p.online, 0) / points.length);
+  const peak = points.reduce((a, p) => (p.online > a.online ? p : a), points[0]);
+  const x = (t: number) => P + ((t - t0) / span) * (W - 2 * P);
+  const y = (v: number) => H - P - (v / top) * (H - 2 * P);
+  const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.online).toFixed(1)}`).join(' ');
+  const area = `${line} L${x(t1).toFixed(1)},${H - P} L${x(t0).toFixed(1)},${H - P} Z`;
+  const hm = (t: number) => new Date(t).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+
+  const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const target = t0 + ratio * span;
+    let best = 0, bestD = Infinity;
+    points.forEach((p, i) => { const d = Math.abs(p.t - target); if (d < bestD) { bestD = d; best = i; } });
+    setHover(best);
+  };
+  const hp = hover != null ? points[hover] : null;
+
+  return (
+    <div>
+      <div className="relative text-accent">
+        <svg viewBox={`0 0 ${W} ${H}`} className="h-36 w-full touch-pan-y" preserveAspectRatio="none" onPointerMove={onMove} onPointerLeave={() => setHover(null)}>
+          <defs>
+            <linearGradient id="onlineGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="currentColor" stopOpacity="0.35" />
+              <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {[0.25, 0.5, 0.75].map(r => <line key={r} x1={P} x2={W - P} y1={H - P - r * (H - 2 * P)} y2={H - P - r * (H - 2 * P)} stroke="currentColor" strokeOpacity="0.08" />)}
+          <path d={area} fill="url(#onlineGrad)" />
+          <path d={line} fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+          {hp && <line x1={x(hp.t)} x2={x(hp.t)} y1={P} y2={H - P} stroke="currentColor" strokeOpacity="0.4" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />}
+        </svg>
+        {hp && (
+          <div className="pointer-events-none absolute top-1 -translate-x-1/2 rounded-md border border-line bg-card px-2 py-1 text-[11px] text-main shadow-lg" style={{ left: `${Math.min(88, Math.max(12, (x(hp.t) / W) * 100))}%` }}>
+            <span className="font-mono font-bold">{hp.online}</span> <span className="text-subtle">· {hm(hp.t)}</span>
+          </div>
+        )}
+      </div>
+      <div className="mt-1 flex justify-between font-mono text-[10px] text-subtle"><span>{hm(t0)}</span><span>{hm(t1)}</span></div>
+      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-lg bg-hover px-2 py-2"><div className="text-[10px] uppercase tracking-wider text-subtle">Puncak</div><div className="text-sm font-semibold text-main">{peak.online} <span className="text-[10px] font-normal text-muted">({hm(peak.t)})</span></div></div>
+        <div className="rounded-lg bg-hover px-2 py-2"><div className="text-[10px] uppercase tracking-wider text-subtle">Rata-rata</div><div className="text-sm font-semibold text-main">{avg}</div></div>
+        <div className="rounded-lg bg-hover px-2 py-2"><div className="text-[10px] uppercase tracking-wider text-subtle">Terendah</div><div className="text-sm font-semibold text-main">{minV}</div></div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════ Group widget config ══════════════ */
+const GROUP_WIDGETS: { id: Exclude<GroupId, 'ALL'>; label: string; icon: string; active: string; idle: string; iconActive: string; iconIdle: string; text: string; dot: string }[] = [
+  { id: 'GOOD', label: 'Good Side', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z', active: 'border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/50', idle: 'border-line bg-card hover:border-emerald-500/30 hover:bg-emerald-500/5', iconActive: 'bg-emerald-500 text-white', iconIdle: 'bg-emerald-500/10 text-emerald-500', text: 'text-emerald-500', dot: 'bg-emerald-500' },
+  { id: 'BAD', label: 'Bad Side', icon: 'M13 10V3L4 14h7v7l9-11h-7z', active: 'border-red-500/50 bg-red-500/10 shadow-[0_0_20px_rgba(239,68,68,0.15)] ring-1 ring-red-500/50', idle: 'border-line bg-card hover:border-red-500/30 hover:bg-red-500/5', iconActive: 'bg-red-500 text-white', iconIdle: 'bg-red-500/10 text-red-500', text: 'text-red-500', dot: 'bg-red-500' },
+  { id: 'CIVILIAN', label: 'Civilian', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z', active: 'border-slate-500/50 bg-slate-500/10 shadow-[0_0_20px_rgba(100,116,139,0.15)] ring-1 ring-slate-500/50', idle: 'border-line bg-card hover:border-slate-500/30 hover:bg-slate-500/5', iconActive: 'bg-slate-500 text-white', iconIdle: 'bg-slate-500/10 text-slate-400', text: 'text-slate-400', dot: 'bg-slate-400' },
+];
+
 /* ══════════════ Main Home (Player Monitor) ══════════════ */
-function Home({ isAdmin, refreshMs, compactMode, tagStyle, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, refreshMs: number, compactMode: boolean, tagStyle: 'pill' | 'widget', onOpenSettings: () => void, onOpenAdmin: () => void }) {
+function Home({ isAdmin, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boolean; settings: Settings; onOpenSettings: () => void; onOpenAdmin: () => void }) {
+  const { refreshMs, compact: compactMode, tagStyle } = settings;
+  const infinite = settings.pageSize === 0;
+  const pageSize = settings.pageSize || 25;
+
   const [data, setData] = useState<ApiData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  
-  // State Filter
-  const [activeGroup, setActiveGroup] = useState<'ALL' | 'GOOD' | 'BAD'>('ALL');
+  const [activeGroup, setActiveGroup] = useState<GroupId>('ALL');
   const [activeCat, setActiveCat] = useState<string>('SEMUA');
-  
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [onlyWatch, setOnlyWatch] = useState(false);
   const [page, setPage] = useState(0);
+  const [visibleCount, setVisibleCount] = useState(50);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [chartOpen, setChartOpen] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
-  
-  const [factions, setFactions] = useState<FactionDef[]>([]);
-  const [countdown, setCountdown] = useState<{ diffMs: number, target: Date } | null>(null);
+  const [delta, setDelta] = useState<number | null>(null);
+  const [pull, setPull] = useState(0);
+  const [urlReady, setUrlReady] = useState(false);
 
+  const [factions, setFactions] = useState<FactionDef[]>(FALLBACK_FACTIONS);
+  const [factionsError, setFactionsError] = useState(false);
+  const [countdown, setCountdown] = useState<{ diffMs: number; target: Date } | null>(null);
+  const [history, setHistory] = useState<HistoryPoint[]>([]);
+  const [watch, setWatch] = useState<Set<string>>(new Set());
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  // refs
+  const settingsRef = useRef(settings); settingsRef.current = settings;
+  const watchRef = useRef(watch); watchRef.current = watch;
+  const sessionsRef = useRef<Record<string, SessionRec>>({});
+  const prevNamesRef = useRef<Set<string> | null>(null);
+  const prevOnlineRef = useRef<number | null>(null);
+  const toastId = useRef(0);
+  const notifiedRestartRef = useRef<number | null>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // nav drag-scroll
   const navRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
-
   const onMouseDown = (e: React.MouseEvent) => { if (!navRef.current) return; setIsDragging(true); setStartX(e.pageX - navRef.current.offsetLeft); setScrollLeft(navRef.current.scrollLeft); };
   const onMouseLeave = () => setIsDragging(false);
   const onMouseUp = () => setIsDragging(false);
   const onMouseMove = (e: React.MouseEvent) => { if (!isDragging || !navRef.current) return; e.preventDefault(); const x = e.pageX - navRef.current.offsetLeft; const walk = (x - startX) * 2; navRef.current.scrollLeft = scrollLeft - walk; };
   const onWheel = (e: React.WheelEvent) => { if (navRef.current) navRef.current.scrollLeft += e.deltaY; };
 
+  const pushToast = useCallback((text: string, kind: ToastItem['kind'] = 'info') => {
+    const id = ++toastId.current;
+    setToasts(t => [...t.slice(-3), { id, text, kind }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4500);
+  }, []);
+
+  /* ── Hydrate dari localStorage (sesi, history, watchlist) ── */
+  useEffect(() => {
+    try { sessionsRef.current = JSON.parse(localStorage.getItem('ime-sessions') || '{}'); } catch { sessionsRef.current = {}; }
+    try {
+      const h: HistoryPoint[] = JSON.parse(localStorage.getItem('ime-online-history') || '[]');
+      const cutoff = Date.now() - DAY_MS;
+      setHistory(h.filter(p => p.t > cutoff));
+    } catch { /* ignore */ }
+    try { setWatch(new Set<string>(JSON.parse(localStorage.getItem('ime-watchlist') || '[]'))); } catch { /* ignore */ }
+    // Riwayat dari server (jika endpoint tersedia)
+    fetch('/api/stats/history').then(r => (r.ok ? r.json() : Promise.reject())).then((rows: { t: string | number; online: number }[]) => {
+      const server: HistoryPoint[] = rows.map(r => ({ t: typeof r.t === 'number' ? r.t : Date.parse(r.t), online: r.online })).filter(p => !Number.isNaN(p.t));
+      if (server.length < 2) return;
+      const lastT = server[server.length - 1].t;
+      setHistory(prev => [...server, ...prev.filter(p => p.t > lastT)]);
+    }).catch(() => { /* fallback ke data lokal */ });
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem('ime-online-history', JSON.stringify(history)); } catch { /* ignore */ }
+  }, [history]);
+
+  const toggleWatch = useCallback((name: string) => {
+    setWatch(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      try { localStorage.setItem('ime-watchlist', JSON.stringify(Array.from(next))); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
+  /* ── Deep link (baca) ── */
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const g = sp.get('group');
+    if (g === 'GOOD' || g === 'BAD' || g === 'CIVILIAN') setActiveGroup(g);
+    const c = sp.get('cat'); if (c) setActiveCat(c);
+    const q = sp.get('q'); if (q) setSearch(q);
+    const s = sp.get('sort');
+    if (s === 'id' || s === 'name' || s === 'ping' || s === 'session') { setSortKey(s); setSortDir(sp.get('dir') === 'desc' ? 'desc' : 'asc'); }
+    setUrlReady(true);
+  }, []);
+
+  /* ── Deep link (tulis) ── */
+  useEffect(() => {
+    if (!urlReady) return;
+    const sp = new URLSearchParams();
+    if (activeGroup !== 'ALL') sp.set('group', activeGroup);
+    if (activeCat !== 'SEMUA') sp.set('cat', activeCat);
+    if (search.trim()) sp.set('q', search.trim());
+    if (sortKey) { sp.set('sort', sortKey); sp.set('dir', sortDir); }
+    const qs = sp.toString();
+    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+  }, [urlReady, activeGroup, activeCat, search, sortKey, sortDir]);
+
+  const copyLink = async () => {
+    try { await navigator.clipboard.writeText(window.location.href); pushToast('Link filter disalin', 'good'); }
+    catch { pushToast('Gagal menyalin link', 'bad'); }
+  };
+
   useEffect(() => {
     const activeEl = navRef.current?.querySelector('[data-active="true"]') as HTMLElement;
     if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
   }, [activeCat]);
 
-  useEffect(() => { 
-    fetch('/api/factions').then(res => res.json()).then(data => {
-      const merged = [...data];
-      FALLBACK_FACTIONS.forEach(fb => {
-        if (!merged.find((f: any) => f.short === fb.short)) merged.push(fb);
-      });
-      setFactions(merged);
-    }); 
+  /* ── Factions (dengan error handling) ── */
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/factions')
+      .then(res => { if (!res.ok) throw new Error('bad status'); return res.json(); })
+      .then((rows: FactionDef[]) => { if (!cancelled) { setFactions(mergeFactions(Array.isArray(rows) ? rows : [])); setFactionsError(false); } })
+      .catch(() => { if (!cancelled) { setFactions(FALLBACK_FACTIONS); setFactionsError(true); } });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (!isAdmin) return;
     const fetchPending = async () => {
-      const res = await fetch('/api/admin/requests');
-      if (res.ok) { const reqs = await res.json(); setPendingCount(reqs.filter((r: any) => r.status === 'PENDING').length); }
+      try {
+        const res = await fetch('/api/admin/requests');
+        if (res.ok) { const reqs = await res.json(); setPendingCount(reqs.filter((r: any) => r.status === 'PENDING').length); }
+      } catch { /* ignore */ }
     };
     fetchPending(); const int = setInterval(fetchPending, 15000); return () => clearInterval(int);
   }, [isAdmin]);
 
+  /* ── Countdown restart ── */
   useEffect(() => {
     const updateTimer = () => {
       const now = new Date(); const wibOffset = 7 * 60 * 60 * 1000; const nowWib = new Date(now.getTime() + wibOffset); const h = nowWib.getUTCHours();
-      let targetWib = new Date(nowWib); targetWib.setUTCHours(0, 0, 0, 0);
+      const targetWib = new Date(nowWib); targetWib.setUTCHours(0, 0, 0, 0);
       if (h < 6) targetWib.setUTCHours(6, 0, 0, 0); else if (h < 18) targetWib.setUTCHours(18, 0, 0, 0); else { targetWib.setUTCDate(targetWib.getUTCDate() + 1); targetWib.setUTCHours(6, 0, 0, 0); }
       const diffMs = targetWib.getTime() - nowWib.getTime(); setCountdown({ diffMs, target: new Date(targetWib.getTime() - wibOffset) });
     };
     updateTimer(); const id = setInterval(updateTimer, 1000); return () => clearInterval(id);
   }, []);
 
+  /* ── Notifikasi restart 30 menit ── */
+  useEffect(() => {
+    if (!countdown || !settings.notifyRestart) return;
+    const key = countdown.target.getTime();
+    if (countdown.diffMs < 30 * 60 * 1000 && notifiedRestartRef.current !== key) {
+      notifiedRestartRef.current = key;
+      browserNotify('Server akan restart', `Restart dalam ${formatTime(countdown.diffMs)}`);
+      pushToast(`⚠ Server restart dalam ${fmtDuration(countdown.diffMs)}`, 'bad');
+    }
+  }, [countdown, settings.notifyRestart, pushToast]);
+
+  /* ── Proses snapshot: join/leave, watchlist, sesi, history ── */
+  const handleSnapshot = useCallback((json: ApiData) => {
+    const now = Date.now();
+    const names = new Set(json.players.map(p => p.name));
+
+    // join / leave
+    const prev = prevNamesRef.current;
+    if (prev) {
+      const joined = Array.from(names).filter(n => !prev.has(n));
+      const left = Array.from(prev).filter(n => !names.has(n));
+      const w = watchRef.current;
+      joined.filter(n => w.has(n)).forEach(n => { pushToast(`⭐ ${n} sekarang online`, 'watch'); browserNotify('Watchlist online', `${n} masuk server`); });
+      left.filter(n => w.has(n)).forEach(n => pushToast(`⭐ ${n} keluar`, 'info'));
+      if (settingsRef.current.notifyJoin && (joined.length || left.length)) {
+        const sample = (arr: string[]) => arr.slice(0, 2).join(', ') + (arr.length > 2 ? ` +${arr.length - 2}` : '');
+        const parts: string[] = [];
+        if (joined.length) parts.push(`+${joined.length} join (${sample(joined)})`);
+        if (left.length) parts.push(`-${left.length} leave (${sample(left)})`);
+        pushToast(parts.join(' · '), joined.length >= left.length ? 'good' : 'bad');
+      }
+    }
+    prevNamesRef.current = names;
+
+    // sesi pemain
+    const sess = sessionsRef.current;
+    names.forEach(n => {
+      const rec = sess[n] ?? { start: null, last: 0, total: 0, count: 0 };
+      if (rec.start != null && now - rec.last > SESSION_GAP_MS) { rec.total += rec.last - rec.start; rec.start = null; }
+      if (rec.start == null) { rec.start = now; rec.count += 1; }
+      rec.last = now;
+      sess[n] = rec;
+    });
+    Object.keys(sess).forEach(n => {
+      const rec = sess[n];
+      if (!names.has(n) && rec.start != null) { rec.total += rec.last - rec.start; rec.start = null; }
+    });
+    const keys = Object.keys(sess);
+    if (keys.length > 600) {
+      keys.filter(k => sess[k].start == null).sort((a, b) => sess[a].last - sess[b].last).slice(0, keys.length - 600).forEach(k => delete sess[k]);
+    }
+    try { localStorage.setItem('ime-sessions', JSON.stringify(sess)); } catch { /* ignore */ }
+
+    // history lokal
+    setHistory(h => {
+      const cutoff = now - DAY_MS;
+      const last = h[h.length - 1];
+      const base = last && now - last.t < 50_000 ? h : [...h, { t: now, online: json.online }];
+      return base.filter(p => p.t > cutoff);
+    });
+  }, [pushToast]);
+
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
       const res = await fetch('/api/players', { cache: 'no-store' }); const json: ApiData = await res.json();
       if (!json.ok) throw new Error(json.error || 'Gagal memuat data');
+      setDelta(prevOnlineRef.current == null ? null : json.online - prevOnlineRef.current);
+      prevOnlineRef.current = json.online;
+      handleSnapshot(json);
       setData(json); setError(null); setLastFetch(new Date());
     } catch (e: any) { setError(e.message || 'Terjadi kesalahan'); } finally { setLoading(false); setRefreshing(false); }
-  }, []);
+  }, [handleSnapshot]);
 
+  const loadRef = useRef(load); loadRef.current = load;
   useEffect(() => { load(); const id = setInterval(load, refreshMs); return () => clearInterval(id); }, [load, refreshMs]);
 
-  const enriched = useMemo(() => (data?.players ?? []).map(p => ({ ...p, faction: detectFaction(p.name, factions) })), [data, factions]);
-  
+  /* ── Pull to refresh (mobile) ── */
+  useEffect(() => {
+    let startY = 0, active = false, dist = 0;
+    const ts = (e: TouchEvent) => { if (window.scrollY <= 0 && e.touches.length === 1) { startY = e.touches[0].clientY; active = true; dist = 0; } };
+    const tm = (e: TouchEvent) => {
+      if (!active) return;
+      const d = e.touches[0].clientY - startY;
+      if (d > 0 && window.scrollY <= 0) { dist = Math.min(d * 0.5, 90); setPull(dist); } else { dist = 0; setPull(0); }
+    };
+    const te = () => { if (active && dist >= 60) loadRef.current(); active = false; dist = 0; setPull(0); };
+    window.addEventListener('touchstart', ts, { passive: true });
+    window.addEventListener('touchmove', tm, { passive: true });
+    window.addEventListener('touchend', te, { passive: true });
+    return () => { window.removeEventListener('touchstart', ts); window.removeEventListener('touchmove', tm); window.removeEventListener('touchend', te); };
+  }, []);
+
+  /* ── Data turunan ── */
+  const matchers = useMemo(() => buildMatchers(factions), [factions]);
+  const factionMap = useMemo(() => { const m = new Map<string, FactionDef>(); factions.forEach(f => m.set(f.id, f)); return m; }, [factions]);
+
+  const enriched: EnrichedPlayer[] = useMemo(() => (data?.players ?? []).map(p => {
+    const faction = detectFaction(p.name, matchers);
+    const side: Side | 'CIVIL' = faction === 'WARGA' ? 'CIVIL' : resolveSide(factionMap.get(faction));
+    return { ...p, faction, side };
+  }), [data, matchers, factionMap]);
+
   const counts = useMemo(() => {
-    const c: Record<string, number> = { SEMUA: enriched.length, GOOD: 0, BAD: 0 };
-    for (const f of [...factions, WARGA]) c[f.id] = 0;
-    
+    const c: Record<string, number> = { SEMUA: enriched.length, GOOD: 0, BAD: 0, CIVILIAN: 0 };
+    for (const f of factions) c[f.id] = 0;
+    c.WARGA = 0;
     for (const p of enriched) {
       c[p.faction] = (c[p.faction] ?? 0) + 1;
-      const facShort = factions.find(f => f.id === p.faction)?.short.toUpperCase() || 'WARGA';
-      const isGood = GOOD_SIDE_SHORTS.some(s => facShort.includes(s));
-      const isBad = BAD_SIDE_SHORTS.some(s => facShort.includes(s));
-      if (isGood) c.GOOD++;
-      if (isBad) c.BAD++;
+      if (p.side === 'CIVIL') c.CIVILIAN++;
+      else if (p.side === 'GOOD') c.GOOD++;
+      else if (p.side === 'BAD') c.BAD++;
     }
     return c;
   }, [enriched, factions]);
 
+  const sessionMs = useCallback((name: string) => {
+    const rec = sessionsRef.current[name];
+    return rec && rec.start != null ? Date.now() - rec.start : 0;
+  }, []);
+
   const filtered = useMemo(() => {
     let list = enriched;
-
-    // 1. Filter by Group (Good/Bad)
     if (activeGroup !== 'ALL') {
-      list = list.filter(p => {
-        const facShort = factions.find(f => f.id === p.faction)?.short.toUpperCase() || 'WARGA';
-        if (activeGroup === 'GOOD') return GOOD_SIDE_SHORTS.some(s => facShort.includes(s));
-        if (activeGroup === 'BAD') return BAD_SIDE_SHORTS.some(s => facShort.includes(s));
-        return true;
-      });
+      list = list.filter(p => activeGroup === 'CIVILIAN' ? p.side === 'CIVIL' : p.side === activeGroup);
     }
-
-    // 2. Filter by Faction (Semua / Spesifik)
     if (activeCat !== 'SEMUA') list = list.filter(p => p.faction === activeCat);
-
-    // 3. Filter by Search
+    if (onlyWatch) list = list.filter(p => watch.has(p.name));
     const q = search.trim().toLowerCase();
     if (q) list = list.filter(p => p.name.toLowerCase().includes(q) || String(p.id).includes(q));
-    
     return list;
-  }, [enriched, activeGroup, activeCat, search, factions]);
+  }, [enriched, activeGroup, activeCat, search, onlyWatch, watch]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const sorted = useMemo(() => {
+    if (!sortKey) return filtered;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const arr = [...filtered];
+    arr.sort((a, b) => {
+      switch (sortKey) {
+        case 'id': return (a.id - b.id) * dir;
+        case 'ping': return (a.ping - b.ping) * dir;
+        case 'name': return a.name.localeCompare(b.name, 'id') * dir;
+        case 'session': return (sessionMs(a.name) - sessionMs(b.name)) * dir;
+      }
+    });
+    return arr;
+  }, [filtered, sortKey, sortDir, sessionMs]);
+
+  const toggleSort = (k: SortKey) => {
+    if (sortKey !== k) { setSortKey(k); setSortDir('asc'); }
+    else if (sortDir === 'asc') setSortDir('desc');
+    else setSortKey(null);
+  };
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   const safePage = Math.min(page, totalPages - 1);
-  const slice = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
+  const slice = infinite ? sorted.slice(0, visibleCount) : sorted.slice(safePage * pageSize, safePage * pageSize + pageSize);
 
   useEffect(() => { if (page !== safePage) setPage(safePage); }, [page, safePage]);
-  useEffect(() => { setPage(0); }, [search, activeCat, activeGroup]);
+  useEffect(() => { setPage(0); setVisibleCount(50); }, [search, activeCat, activeGroup, onlyWatch, pageSize]);
 
-  // Filter Nav Items berdasarkan Group yang dipilih
+  // Infinite scroll
+  useEffect(() => {
+    if (!infinite || !sentinelRef.current) return;
+    const el = sentinelRef.current;
+    const io = new IntersectionObserver(es => { if (es[0].isIntersecting) setVisibleCount(v => v + 50); }, { rootMargin: '200px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [infinite, sorted.length, visibleCount]);
+
   const navCats = useMemo(() => {
     const items = [
-      { id: 'SEMUA', short: 'Semua', dot: 'bg-accent' },
+      { id: 'SEMUA', short: 'Semua', dot: 'bg-accent', color: null as string | null | undefined },
       ...factions.filter(f => {
         if (activeGroup === 'ALL') return true;
-        const isGood = GOOD_SIDE_SHORTS.some(gf => f.short.includes(gf));
-        const isBad = BAD_SIDE_SHORTS.some(bf => f.short.includes(bf));
-        return activeGroup === 'GOOD' ? isGood : isBad;
-      }).map(f => ({ id: f.id, short: f.short.split(',')[0], dot: f.dot })),
-      { id: 'WARGA', short: WARGA.short, dot: WARGA.dot }
+        if (activeGroup === 'CIVILIAN') return false;
+        return resolveSide(f) === activeGroup;
+      }).map(f => ({ id: f.id, short: f.short.split(',')[0], dot: f.dot, color: f.color })),
+      { id: 'WARGA', short: WARGA.short, dot: WARGA.dot, color: null },
     ];
-    return items.filter(it => (counts[it.id] ?? 0) > 0 || it.id === activeCat || it.id === 'SEMUA' || it.id === 'WARGA');
+    return items.filter(it => {
+      if (it.id === 'WARGA') return activeGroup === 'ALL' || activeGroup === 'CIVILIAN';
+      return (counts[it.id] ?? 0) > 0 || it.id === activeCat || it.id === 'SEMUA';
+    });
   }, [counts, activeCat, factions, activeGroup]);
 
   const isWarning = countdown && countdown.diffMs < 30 * 60 * 1000;
 
+  const copyName = async (name: string) => {
+    try { await navigator.clipboard.writeText(name); pushToast(`Disalin: ${name}`, 'info'); }
+    catch { pushToast('Gagal menyalin', 'bad'); }
+  };
+
+  const exportCsv = () => {
+    const rows: (string | number)[][] = [['Kantong', 'Nama', 'Faction', 'Side', 'Ping']];
+    sorted.forEach(p => {
+      const f = p.faction === 'WARGA' ? WARGA : factionMap.get(p.faction);
+      rows.push([p.id, p.name, f?.label ?? 'Civilian', p.side === 'CIVIL' ? 'Civilian' : p.side, p.ping]);
+    });
+    downloadCsv(`players-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.csv`, toCsv(rows));
+    pushToast(`${sorted.length} player diekspor`, 'good');
+  };
+
+  const sortTh = (k: SortKey, label: string, cls: string) => (
+    <th className={cls}>
+      <button onClick={() => toggleSort(k)} className="inline-flex items-center gap-1 uppercase tracking-wider transition hover:text-main">
+        {label}
+        <span className={sortKey === k ? 'text-accent' : 'opacity-30'}>{sortKey === k ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+      </button>
+    </th>
+  );
+
+  const rowH = compactMode ? 'h-10' : 'h-14';
+
   return (
     <main className="min-h-screen bg-app text-main">
+      {/* Pull-to-refresh indicator */}
+      {pull > 0 && (
+        <div className="pointer-events-none fixed left-0 right-0 top-14 z-50 flex justify-center" style={{ transform: `translateY(${pull * 0.6}px)`, opacity: Math.min(1, pull / 60) }}>
+          <div className="flex items-center gap-2 rounded-full border border-line bg-card px-3 py-1.5 text-[11px] text-muted shadow-lg">
+            <RefreshIcon className={`h-3.5 w-3.5 ${pull >= 60 ? 'text-accent' : ''}`} />{pull >= 60 ? 'Lepas untuk refresh' : 'Tarik untuk refresh'}
+          </div>
+        </div>
+      )}
+
+      {/* Toasts */}
+      <div className="pointer-events-none fixed bottom-4 left-0 right-0 z-[200] flex flex-col items-center gap-2 px-3">
+        {toasts.map(t => (
+          <div key={t.id} className={`pointer-events-auto max-w-sm rounded-xl border px-4 py-2.5 text-xs font-medium shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 ${t.kind === 'good' ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-400' : t.kind === 'bad' ? 'border-red-500/30 bg-red-500/15 text-red-400' : t.kind === 'watch' ? 'border-amber-500/40 bg-amber-500/15 text-amber-400' : 'border-line bg-card text-main'}`}>
+            {t.text}
+          </div>
+        ))}
+      </div>
+
       <div className="fixed top-3 left-0 right-0 z-40 flex justify-center px-3">
         <div className="relative w-full max-w-5xl overflow-hidden rounded-full">
           <div className="pointer-events-none absolute left-0 top-0 z-20 h-full w-12 bg-gradient-to-r from-app via-app/80 to-transparent rounded-l-full backdrop-blur-[2px]" />
-          
-          <div 
+
+          <div
             ref={navRef} onMouseDown={onMouseDown} onMouseLeave={onMouseLeave} onMouseUp={onMouseUp} onMouseMove={onMouseMove} onWheel={onWheel}
             className={`nav-scroll no-scrollbar flex items-center gap-1 overflow-x-auto rounded-full border border-line bg-nav px-3 py-1.5 shadow-[0_4px_30px_rgba(0,0,0,0.3)] backdrop-blur-xl ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
           >
@@ -666,7 +1241,7 @@ function Home({ isAdmin, refreshMs, compactMode, tagStyle, onOpenSettings, onOpe
                 <button key={cat.id} data-active={active} onClick={() => setActiveCat(cat.id)}
                   className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-300 ${active ? 'bg-accent text-accent-text shadow-[0_0_12px_var(--accent)]' : 'text-muted hover:bg-hover hover:text-main'}`}
                 >
-                  <span className={`h-1.5 w-1.5 rounded-full transition-colors ${active ? 'bg-accent-text' : cat.dot}`} />
+                  <span className={`h-1.5 w-1.5 rounded-full transition-colors ${active ? 'bg-accent-text' : cat.color ? '' : cat.dot}`} style={!active && cat.color ? { backgroundColor: cat.color } : undefined} />
                   <span>{cat.short}</span>
                   <span className={`text-[10px] ${active ? 'text-accent-text/80' : 'text-subtle'}`}>{counts[cat.id] ?? 0}</span>
                 </button>
@@ -681,7 +1256,13 @@ function Home({ isAdmin, refreshMs, compactMode, tagStyle, onOpenSettings, onOpe
         <header className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-subtle">IME Roleplay</div>
-            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Player Monitor</h1>
+            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight sm:text-3xl">
+              Player Monitor
+              <span className="relative flex h-3 w-3">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-500"></span>
+              </span>
+            </h1>
             <p className="mt-1 text-sm text-muted">Pantau siapa saja yang sedang bermain sekarang</p>
           </div>
 
@@ -698,86 +1279,86 @@ function Home({ isAdmin, refreshMs, compactMode, tagStyle, onOpenSettings, onOpe
                 {pendingCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white border-2 border-app">{pendingCount}</span>}
               </button>
             )}
+            <button onClick={() => setHistoryOpen(true)} className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-card text-muted transition hover:border-accent/50 hover:text-main" title="Riwayat sesi"><ClockIcon className="h-4 w-4" /></button>
             <button onClick={onOpenSettings} className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-card text-muted transition-all duration-300 hover:border-accent/50 hover:text-main hover:rotate-90" title="Pengaturan"><GearIcon className="h-4 w-4" /></button>
             <button onClick={() => setAiOpen(true)} className="group flex items-center gap-2 rounded-full border border-line bg-card px-4 py-1.5 text-xs font-medium text-accent transition hover:border-accent/50 hover:bg-hover"><SparkIcon className="h-3.5 w-3.5" />Tanya AI</button>
           </div>
         </header>
 
-        {isWarning && (
+        {isWarning && countdown && (
           <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500 animate-pulse">
             <svg className="h-5 w-5 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
             <div><span className="font-bold tracking-wide">PERINGATAN BADAI:</span> Server akan direstart dalam <span className="font-mono font-bold">{formatTime(countdown.diffMs)}</span>.</div>
           </div>
         )}
 
+        {factionsError && (
+          <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-500">Daftar faction dari server gagal dimuat — memakai daftar bawaan.</div>
+        )}
+
         <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Stat label="Online" value={data ? fmt(data.online) : '—'} accent="text-emerald-500" />
+          <Stat label="Online" value={data ? fmt(data.online) : '—'} accent="text-emerald-500" pulse delta={delta} />
           <Stat label="Max Slots" value={data ? fmt(data.max) : '—'} accent="text-blue-500" />
           <Stat label="Gate" value={data?.gate ?? '—'} accent="text-accent" small />
           <Stat label="Terakhir" value={lastFetch ? lastFetch.toLocaleTimeString('id-ID') : '—'} accent="text-muted" small />
         </section>
 
-        {/* ══════════ WIDGET GOOD SIDE vs BAD SIDE ══════════ */}
-        <div className="mb-6 grid grid-cols-2 gap-3">
-          {/* Widget Good Side */}
-          <button 
-            onClick={() => { setActiveGroup(activeGroup === 'GOOD' ? 'ALL' : 'GOOD'); setActiveCat('SEMUA'); }}
-            className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl border p-4 text-left transition-all duration-300 ${
-              activeGroup === 'GOOD' 
-                ? 'border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/50' 
-                : 'border-line bg-card hover:border-emerald-500/30 hover:bg-emerald-500/5'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <div className={`flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${activeGroup === 'GOOD' ? 'bg-emerald-500 text-white' : 'bg-emerald-500/10 text-emerald-500'}`}>
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
-              </div>
-              {activeGroup === 'GOOD' && <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />}
+        {/* Grafik tren online */}
+        <section className="mb-6 rounded-2xl border border-line bg-card p-4">
+          <button onClick={() => setChartOpen(o => !o)} className="flex w-full items-center justify-between text-left">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Tren Online · 24 jam terakhir</div>
+              <div className="mt-0.5 text-xs text-muted">Lihat jam ramai & perkiraan jam sepi</div>
             </div>
-            <div className="mt-4">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-500">Good Side</div>
-              <div className="mt-1 flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-main">{counts.GOOD}</span>
-                <span className="text-xs text-muted">player online</span>
-              </div>
-            </div>
+            <span className={`text-subtle transition-transform ${chartOpen ? 'rotate-180' : ''}`}>▾</span>
           </button>
+          {chartOpen && <div className="mt-3"><OnlineChart points={history} /></div>}
+        </section>
 
-          {/* Widget Bad Side */}
-          <button 
-            onClick={() => { setActiveGroup(activeGroup === 'BAD' ? 'ALL' : 'BAD'); setActiveCat('SEMUA'); }}
-            className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl border p-4 text-left transition-all duration-300 ${
-              activeGroup === 'BAD' 
-                ? 'border-red-500/50 bg-red-500/10 shadow-[0_0_20px_rgba(239,68,68,0.15)] ring-1 ring-red-500/50' 
-                : 'border-line bg-card hover:border-red-500/30 hover:bg-red-500/5'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <div className={`flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${activeGroup === 'BAD' ? 'bg-red-500 text-white' : 'bg-red-500/10 text-red-500'}`}>
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-              </div>
-              {activeGroup === 'BAD' && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse" />}
-            </div>
-            <div className="mt-4">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-red-500">Bad Side</div>
-              <div className="mt-1 flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-main">{counts.BAD}</span>
-                <span className="text-xs text-muted">player online</span>
-              </div>
-            </div>
-          </button>
+        {/* Widget Good / Bad / Civilian */}
+        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {GROUP_WIDGETS.map(w => {
+            const on = activeGroup === w.id;
+            return (
+              <button key={w.id}
+                onClick={() => { setActiveGroup(on ? 'ALL' : w.id); setActiveCat('SEMUA'); }}
+                className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl border p-4 text-left transition-all duration-300 ${on ? w.active : w.idle}`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${on ? w.iconActive : w.iconIdle}`}>
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={w.icon} /></svg>
+                  </div>
+                  {on && <span className={`flex h-2 w-2 rounded-full animate-pulse ${w.dot}`} />}
+                </div>
+                <div className="mt-4">
+                  <div className={`text-[10px] font-semibold uppercase tracking-wider ${w.text}`}>{w.label}</div>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className="text-2xl font-bold text-main">{counts[w.id]}</span>
+                    <span className="text-xs text-muted">player</span>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
 
         {error && <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">⚠ {error}</div>}
 
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row">
-          <div className="relative flex-1">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+          <div className="relative min-w-[200px] flex-1">
             <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
             <input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari nama atau kantong…" className="w-full rounded-lg border border-line bg-card py-2.5 pl-10 pr-4 text-sm text-main placeholder-subtle outline-none transition focus:border-accent/50 focus:ring-2 focus:ring-accent/15" />
           </div>
-          <button onClick={load} disabled={refreshing} className="inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-card px-4 py-2.5 text-sm font-medium text-main transition hover:border-accent/40 disabled:opacity-40 sm:w-auto w-full">
-            <RefreshIcon className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => setOnlyWatch(o => !o)} className={`inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition ${onlyWatch ? 'border-amber-500/50 bg-amber-500/10 text-amber-500' : 'border-line bg-card text-main hover:border-amber-500/40'}`} title="Hanya watchlist">
+              <StarIcon className="h-4 w-4" filled={onlyWatch} /><span className="text-xs">{watch.size}</span>
+            </button>
+            <button onClick={exportCsv} disabled={sorted.length === 0} className="inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-card px-3 py-2.5 text-sm font-medium text-main transition hover:border-accent/40 disabled:opacity-40" title="Ekspor CSV (sesuai filter)"><DownloadIcon className="h-4 w-4" /><span className="hidden sm:inline">CSV</span></button>
+            <button onClick={copyLink} className="inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-card px-3 py-2.5 text-sm font-medium text-main transition hover:border-accent/40" title="Salin link dengan filter ini"><LinkIcon className="h-4 w-4" /><span className="hidden sm:inline">Link</span></button>
+            <button onClick={load} disabled={refreshing} className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-line bg-card px-4 py-2.5 text-sm font-medium text-main transition hover:border-accent/40 disabled:opacity-40 sm:flex-none">
+              <RefreshIcon className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
+            </button>
+          </div>
         </div>
 
         <div className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
@@ -785,42 +1366,44 @@ function Home({ isAdmin, refreshMs, compactMode, tagStyle, onOpenSettings, onOpe
             <table className="w-full text-sm whitespace-nowrap">
               <thead>
                 <tr className={`border-b border-line bg-hover text-left text-[10px] font-semibold uppercase tracking-wider text-subtle ${compactMode ? 'h-9' : 'h-11'}`}>
-                  <th className="w-24 px-4">Kantong</th>
-                  <th className="px-4">Nama</th>
-                  <th className="w-20 px-4 text-right">Ping</th>
+                  <th className="w-10 pl-4" />
+                  {sortTh('id', 'Kantong', 'w-24 px-4')}
+                  {sortTh('name', 'Nama', 'px-4')}
+                  {sortTh('session', 'Sesi', 'hidden w-24 px-4 sm:table-cell')}
+                  {sortTh('ping', 'Ping', 'w-20 px-4 text-right')}
                 </tr>
               </thead>
               <tbody>
                 {loading && !data ? (
-                  <tr><td colSpan={3} className="px-4 py-16 text-center text-subtle">Memuat data…</td></tr>
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i} className={`border-b border-line ${rowH}`}>
+                      <td className="pl-4"><div className="h-4 w-4 animate-pulse rounded bg-hover" /></td>
+                      <td className="px-4"><div className="h-5 w-12 animate-pulse rounded bg-hover" /></td>
+                      <td className="px-4"><div className="flex items-center gap-2"><div className="h-6 w-16 animate-pulse rounded-full bg-hover" /><div className="h-4 w-40 animate-pulse rounded bg-hover" /></div></td>
+                      <td className="hidden px-4 sm:table-cell"><div className="h-4 w-10 animate-pulse rounded bg-hover" /></td>
+                      <td className="px-4 text-right"><div className="ml-auto h-5 w-10 animate-pulse rounded bg-hover" /></td>
+                    </tr>
+                  ))
                 ) : slice.length === 0 ? (
-                  <tr><td colSpan={3} className="px-4 py-16 text-center text-subtle">{filtered.length ? 'Tidak ada hasil.' : 'Tidak ada player di kategori ini.'}</td></tr>
+                  <tr><td colSpan={5} className="px-4 py-16 text-center text-subtle">{filtered.length ? 'Tidak ada hasil.' : onlyWatch ? 'Tidak ada pemain watchlist yang online.' : 'Tidak ada player di kategori ini.'}</td></tr>
                 ) : slice.map(p => {
-                  const fac = p.faction === 'WARGA' ? WARGA : factions.find(f => f.id === p.faction) ?? WARGA;
+                  const fac = p.faction === 'WARGA' ? WARGA : factionMap.get(p.faction) ?? WARGA;
+                  const watched = watch.has(p.name);
                   return (
-                    <tr key={p.id} className={`border-b border-line transition hover:bg-hover ${compactMode ? 'h-10' : 'h-14'}`}>
+                    <tr key={p.id} onClick={() => copyName(p.name)} title="Klik untuk menyalin nama" className={`cursor-pointer border-b border-line transition hover:bg-hover ${rowH} ${watched ? 'bg-amber-500/5' : ''}`}>
+                      <td className="pl-4">
+                        <button onClick={e => { e.stopPropagation(); toggleWatch(p.name); }} className={`flex h-6 w-6 items-center justify-center rounded transition ${watched ? 'text-amber-500' : 'text-subtle hover:text-amber-500'}`} title={watched ? 'Hapus dari watchlist' : 'Tambah ke watchlist'}>
+                          <StarIcon className="h-4 w-4" filled={watched} />
+                        </button>
+                      </td>
                       <td className="px-4"><span className="inline-flex items-center rounded-md border border-line bg-app px-2 py-0.5 font-mono text-[11px] font-medium text-main">#{p.id}</span></td>
                       <td className="px-4">
                         <div className="flex items-center gap-2">
-                          
-                          {/* WIDGET STYLE BADGE */}
-                          {tagStyle === 'pill' ? (
-                            <div className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${fac.badge}`}>
-                              <span className={`h-1.5 w-1.5 rounded-full ${fac.dot}`} />
-                              {fac.short.split(',')[0]}
-                            </div>
-                          ) : (
-                            <div className={`inline-flex shrink-0 items-center gap-2 rounded-[14px] border border-white/5 bg-white/5 px-3 py-1.5 text-[11px] font-semibold shadow-sm backdrop-blur-md ${fac.badge.replace('bg-', 'text-').split(' ')[0]} ${fac.badge}`}>
-                              <span className={`flex h-4 w-4 items-center justify-center rounded-full bg-white/10 ${fac.dot}`}>
-                                <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
-                              </span>
-                              {fac.short.split(',')[0]}
-                            </div>
-                          )}
-
+                          <FactionTag fac={fac} variant={tagStyle} />
                           <span className="truncate text-[13px] text-main max-w-[120px] sm:max-w-none">{p.name}</span>
                         </div>
                       </td>
+                      <td className="hidden px-4 font-mono text-[11px] text-muted sm:table-cell">{fmtDuration(sessionMs(p.name))}</td>
                       <td className="px-4 text-right"><span className={`inline-flex rounded border px-2 py-0.5 font-mono text-[11px] font-medium ${pingClass(p.ping)}`}>{p.ping}</span></td>
                     </tr>
                   );
@@ -830,36 +1413,83 @@ function Home({ isAdmin, refreshMs, compactMode, tagStyle, onOpenSettings, onOpe
           </div>
         </div>
 
+        {infinite && visibleCount < sorted.length && <div ref={sentinelRef} className="py-6 text-center text-xs text-subtle">Memuat lebih banyak…</div>}
+
         <div className="mt-4 flex flex-col items-center justify-between gap-4 text-xs text-muted sm:flex-row">
-          <div className="order-2 sm:order-1">Auto-refresh {refreshMs/1000} detik · {filtered.length} player</div>
-          <div className="order-1 flex w-full items-center justify-between gap-2 sm:order-2 sm:w-auto">
-            <button onClick={() => setPage(Math.max(0, safePage - 1))} disabled={safePage <= 0} className="flex-1 rounded-lg border border-line bg-card py-2 font-medium text-main transition hover:border-accent/40 disabled:opacity-30 sm:flex-none sm:px-4 sm:py-1.5">← Prev</button>
-            <span className="min-w-[52px] text-center font-mono text-muted">{safePage + 1}/{totalPages}</span>
-            <button onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))} disabled={safePage >= totalPages - 1} className="flex-1 rounded-lg border border-line bg-card py-2 font-medium text-main transition hover:border-accent/40 disabled:opacity-30 sm:flex-none sm:px-4 sm:py-1.5">Next →</button>
-          </div>
+          <div className="order-2 sm:order-1">Auto-refresh {refreshMs / 1000} detik · {sorted.length} player{infinite ? ` · menampilkan ${Math.min(visibleCount, sorted.length)}` : ''}</div>
+          {!infinite && (
+            <div className="order-1 flex w-full items-center justify-between gap-2 sm:order-2 sm:w-auto">
+              <button onClick={() => setPage(Math.max(0, safePage - 1))} disabled={safePage <= 0} className="flex-1 rounded-lg border border-line bg-card py-2 font-medium text-main transition hover:border-accent/40 disabled:opacity-30 sm:flex-none sm:px-4 sm:py-1.5">← Prev</button>
+              <span className="min-w-[52px] text-center font-mono text-muted">{safePage + 1}/{totalPages}</span>
+              <button onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))} disabled={safePage >= totalPages - 1} className="flex-1 rounded-lg border border-line bg-card py-2 font-medium text-main transition hover:border-accent/40 disabled:opacity-30 sm:flex-none sm:px-4 sm:py-1.5">Next →</button>
+            </div>
+          )}
         </div>
       </div>
 
-      <AIDrawer open={aiOpen} onClose={() => setAiOpen(false)} data={data} enriched={enriched} counts={counts} activeCat={activeCat} factions={factions} />
+      <HistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} sessions={sessionsRef.current} onlineNames={prevNamesRef.current} watch={watch} onToggleWatch={toggleWatch} />
+      <AIDrawer open={aiOpen} onClose={() => setAiOpen(false)} data={data} enriched={enriched} counts={counts} activeCat={activeCat} factionMap={factionMap} />
     </main>
   );
 }
 
-/* ══════════════ Settings Modal ══════════════ */
-function SettingsModal({ open, onClose, currentTheme, currentRefresh, currentCompact, currentTag, onSave }: any) {
-  const [theme, setTheme] = useState(currentTheme);
-  const [refreshMs, setRefreshMs] = useState(currentRefresh);
-  const [compactMode, setCompactMode] = useState(currentCompact);
-  const [tagStyle, setTagStyle] = useState(currentTag);
+/* ══════════════ Riwayat Sesi Modal ══════════════ */
+function HistoryModal({ open, onClose, sessions, onlineNames, watch, onToggleWatch }: { open: boolean; onClose: () => void; sessions: Record<string, SessionRec>; onlineNames: Set<string> | null; watch: Set<string>; onToggleWatch: (n: string) => void }) {
+  const [q, setQ] = useState('');
+  const rows = useMemo(() => {
+    if (!open) return [];
+    const needle = q.trim().toLowerCase();
+    return Object.entries(sessions)
+      .filter(([name]) => !needle || name.toLowerCase().includes(needle))
+      .map(([name, rec]) => ({ name, rec, online: rec.start != null && !!onlineNames?.has(name), cur: rec.start != null ? rec.last - rec.start : 0 }))
+      .sort((a, b) => (a.online === b.online ? b.rec.last - a.rec.last : a.online ? -1 : 1))
+      .slice(0, 200);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, q, sessions, onlineNames]);
 
-  useEffect(() => {
-    if (open) { 
-      setTheme(currentTheme); 
-      setRefreshMs(currentRefresh); 
-      setCompactMode(currentCompact); 
-      setTagStyle(currentTag);
-    }
-  }, [open, currentTheme, currentRefresh, currentCompact, currentTag]);
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-line bg-card shadow-2xl">
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
+          <div><div className="text-sm font-semibold text-main">Riwayat Sesi Pemain</div><div className="text-[11px] text-subtle">Terakhir terlihat & total waktu main</div></div>
+          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+        </div>
+        <div className="border-b border-line p-3"><input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Cari nama…" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent/50" /></div>
+        <div className="flex-1 overflow-y-auto">
+          {rows.length === 0 ? <div className="px-4 py-12 text-center text-sm text-subtle">Belum ada data sesi.</div> : rows.map(r => (
+            <div key={r.name} className="flex items-center gap-3 border-b border-line px-4 py-3">
+              <button onClick={() => onToggleWatch(r.name)} className={watch.has(r.name) ? 'text-amber-500' : 'text-subtle hover:text-amber-500'}><StarIcon className="h-4 w-4" filled={watch.has(r.name)} /></button>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] text-main">{r.name}</div>
+                <div className="mt-0.5 text-[11px] text-muted">
+                  {r.online ? <span className="text-emerald-500">● Online · sesi {fmtDuration(Date.now() - (r.rec.start ?? Date.now()))}</span> : <>Terakhir: {timeAgo(r.rec.last)}</>}
+                </div>
+              </div>
+              <div className="text-right text-[11px] text-muted"><div className="font-mono text-main">{fmtDuration(r.rec.total + r.cur)}</div><div>{r.rec.count}× sesi</div></div>
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-line bg-app px-5 py-2 text-[10px] text-subtle">Dicatat dari browser ini hanya saat halaman terbuka, jadi angka bisa lebih kecil dari waktu main sebenarnya.</div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════ Settings Modal ══════════════ */
+function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button onClick={() => onChange(!on)} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${on ? 'bg-accent' : 'bg-hover'}`}>
+      <span className={`absolute top-1 left-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${on ? 'translate-x-5' : 'translate-x-0'}`} />
+    </button>
+  );
+}
+
+function SettingsModal({ open, onClose, current, onSave }: { open: boolean; onClose: () => void; current: Settings; onSave: (s: Settings) => void }) {
+  const [draft, setDraft] = useState<Settings>(current);
+  useEffect(() => { if (open) setDraft(current); }, [open, current]);
+  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setDraft(d => ({ ...d, [k]: v }));
 
   if (!open) return null;
 
@@ -878,49 +1508,68 @@ function SettingsModal({ open, onClose, currentTheme, currentRefresh, currentCom
           <div>
             <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Tema Tampilan</div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {[
-                { id: 'dark', label: 'Dark', bg: 'bg-[#0c0a08]', border: 'border-[#2a2520]' }, 
-                { id: 'light', label: 'Light', bg: 'bg-[#f8fafc]', border: 'border-[#e2e8f0]' }, 
+              {([
+                { id: 'dark', label: 'Dark', bg: 'bg-[#0c0a08]', border: 'border-[#2a2520]' },
+                { id: 'light', label: 'Light', bg: 'bg-[#f8fafc]', border: 'border-[#e2e8f0]' },
                 { id: 'glass', label: 'Glass', bg: 'bg-[#09090b]', border: 'border-white/10' },
                 { id: 'cyberpunk', label: 'Cyberpunk', bg: 'bg-[#050505]', border: 'border-[#fcee0a]' },
-                { id: 'nord', label: 'Nord', bg: 'bg-[#2e3440]', border: 'border-[#4c566a]' }
-              ].map(t => (
-                <button key={t.id} onClick={() => setTheme(t.id)} className={`group relative flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${theme === t.id ? 'border-accent ring-2 ring-accent/20' : 'border-line hover:border-accent/40'}`}>
-                  <div className={`h-10 w-full rounded-md border ${t.bg} ${t.border} flex items-center justify-center`}><div className={`h-1.5 w-6 rounded-full ${theme === t.id ? 'bg-accent' : 'bg-line'}`} /></div>
-                  <span className={`text-xs font-medium ${theme === t.id ? 'text-accent' : 'text-muted group-hover:text-main'}`}>{t.label}</span>
+                { id: 'nord', label: 'Nord', bg: 'bg-[#2e3440]', border: 'border-[#4c566a]' },
+              ] as { id: Theme; label: string; bg: string; border: string }[]).map(t => (
+                <button key={t.id} onClick={() => set('theme', t.id)} className={`group relative flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${draft.theme === t.id ? 'border-accent ring-2 ring-accent/20' : 'border-line hover:border-accent/40'}`}>
+                  <div className={`h-10 w-full rounded-md border ${t.bg} ${t.border} flex items-center justify-center`}><div className={`h-1.5 w-6 rounded-full ${draft.theme === t.id ? 'bg-accent' : 'bg-line'}`} /></div>
+                  <span className={`text-xs font-medium ${draft.theme === t.id ? 'text-accent' : 'text-muted group-hover:text-main'}`}>{t.label}</span>
                 </button>
               ))}
             </div>
           </div>
-          
+
           <hr className="border-line" />
-          
-          {/* SETTING GAYA TAG */}
+
           <div>
             <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Gaya Tag Faction</div>
             <div className="flex rounded-lg border border-line bg-app p-1">
-              <button onClick={() => setTagStyle('pill')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${tagStyle === 'pill' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Pill (Bulat)</button>
-              <button onClick={() => setTagStyle('widget')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${tagStyle === 'widget' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Widget (Soft Card)</button>
+              <button onClick={() => set('tagStyle', 'pill')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${draft.tagStyle === 'pill' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Pill (Bulat)</button>
+              <button onClick={() => set('tagStyle', 'widget')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${draft.tagStyle === 'widget' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Widget (Soft Card)</button>
             </div>
           </div>
 
           <hr className="border-line" />
+
           <div>
-            <div className="mb-3 flex items-center justify-between"><div className="text-[11px] font-semibold uppercase tracking-wider text-subtle">Interval Refresh</div><div className="text-[11px] text-muted">{refreshMs / 1000} detik</div></div>
+            <div className="mb-3 flex items-center justify-between"><div className="text-[11px] font-semibold uppercase tracking-wider text-subtle">Interval Refresh</div><div className="text-[11px] text-muted">{draft.refreshMs / 1000} detik</div></div>
             <div className="flex rounded-lg border border-line bg-app p-1">
               {[30, 60, 120].map(s => (
-                <button key={s} onClick={() => setRefreshMs(s * 1000)} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${refreshMs === s * 1000 ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>{s} Detik</button>
+                <button key={s} onClick={() => set('refreshMs', s * 1000)} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${draft.refreshMs === s * 1000 ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>{s} Detik</button>
               ))}
             </div>
           </div>
+
+          <div>
+            <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Jumlah Baris</div>
+            <div className="flex rounded-lg border border-line bg-app p-1">
+              {[{ v: 25, l: '25' }, { v: 50, l: '50' }, { v: 100, l: '100' }, { v: 0, l: 'Infinite' }].map(o => (
+                <button key={o.v} onClick={() => set('pageSize', o.v)} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${draft.pageSize === o.v ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>{o.l}</button>
+              ))}
+            </div>
+          </div>
+
           <hr className="border-line" />
-          <div className="flex items-center justify-between">
+
+          <div className="flex items-center justify-between gap-4">
             <div><div className="text-sm font-medium text-main">Mode Ringkas</div><div className="text-[11px] text-muted mt-0.5">Kurangi jarak antar baris tabel agar muat lebih banyak.</div></div>
-            <button onClick={() => setCompactMode(!compactMode)} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${compactMode ? 'bg-accent' : 'bg-hover'}`}><span className={`absolute top-1 left-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${compactMode ? 'translate-x-5' : 'translate-x-0'}`} /></button>
+            <Toggle on={draft.compact} onChange={v => set('compact', v)} />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div><div className="text-sm font-medium text-main">Notifikasi Join / Leave</div><div className="text-[11px] text-muted mt-0.5">Toast saat ada pemain masuk atau keluar.</div></div>
+            <Toggle on={draft.notifyJoin} onChange={v => set('notifyJoin', v)} />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div><div className="text-sm font-medium text-main">Pengingat Restart</div><div className="text-[11px] text-muted mt-0.5">Notifikasi browser saat sisa 30 menit sebelum restart.</div></div>
+            <Toggle on={draft.notifyRestart} onChange={v => set('notifyRestart', v)} />
           </div>
         </div>
         <div className="border-t border-line bg-app px-5 py-3 text-right sticky bottom-0 z-10">
-          <button onClick={() => onSave(theme, refreshMs, compactMode, tagStyle)} className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-text transition hover:bg-accent-hover">Simpan & Tutup</button>
+          <button onClick={() => onSave(draft)} className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-text transition hover:bg-accent-hover">Simpan & Tutup</button>
         </div>
       </div>
     </div>
@@ -928,39 +1577,106 @@ function SettingsModal({ open, onClose, currentTheme, currentRefresh, currentCom
 }
 
 /* ══════════════ AI Drawer ══════════════ */
-function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factions }: any) {
+const AI_STOPWORDS = new Set(['siapa', 'saja', 'yang', 'ada', 'berapa', 'dan', 'nama', 'mereka', 'online', 'sekarang', 'apa', 'paling', 'banyak', 'player', 'pemain', 'di', 'itu', 'ini', 'dari', 'ke', 'untuk', 'dengan', 'ringkas', 'mana', 'the', 'of']);
+const AI_ALIASES: Record<string, string[]> = { polisi: ['lspd', 'lssd'], medis: ['medic'], dokter: ['medic'], pemerintah: ['gov'], ems: ['medic'] };
+
+function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factionMap }: { open: boolean; onClose: () => void; data: ApiData | null; enriched: EnrichedPlayer[]; counts: Record<string, number>; activeCat: string; factionMap: Map<string, FactionDef> }) {
   const [msgs, setMsgs] = useState<AiMsg[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const hydrated = useRef(false);
+
+  // Riwayat chat per sesi browser
+  useEffect(() => {
+    try { const raw = sessionStorage.getItem('ime-ai-chat'); if (raw) setMsgs(JSON.parse(raw)); } catch { /* ignore */ }
+    hydrated.current = true;
+  }, []);
+  useEffect(() => {
+    if (!hydrated.current) return;
+    try { sessionStorage.setItem('ime-ai-chat', JSON.stringify(msgs.slice(-40))); } catch { /* ignore */ }
+  }, [msgs]);
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [msgs, sending]);
 
-  const buildContext = useCallback(() => {
+  const factionLabel = useCallback((p: EnrichedPlayer) => (p.faction === 'WARGA' ? WARGA : factionMap.get(p.faction))?.label || 'Untagged', [factionMap]);
+
+  // Konteks pintar: ringkasan lengkap + hanya player yang relevan dengan pertanyaan
+  const buildContext = useCallback((query: string) => {
     if (!data) return null;
-    const factionSummary: any = {};
+    const factionSummary: Record<string, { label: string; count: number }> = {};
     for (const [id, count] of Object.entries(counts)) {
-      if (id === 'SEMUA' || id === 'GOOD' || id === 'BAD' || !count) continue;
-      const f = id === 'WARGA' ? WARGA : factions.find((x: any) => x.id === id);
+      if (['SEMUA', 'GOOD', 'BAD', 'CIVILIAN'].includes(id) || !count) continue;
+      const f = id === 'WARGA' ? WARGA : factionMap.get(id);
       factionSummary[id] = { label: f?.label || 'Unknown', count };
     }
-    return { totalOnline: data.online, maxSlots: data.max, gate: data.gate, updatedAt: data.updatedAt, currentFilter: activeCat, factions: factionSummary, players: enriched.slice(0, 150).map((p: any) => ({ kantong: p.id, nama: p.name, faction: (p.faction === 'WARGA' ? WARGA : factions.find((x:any) => x.id === p.faction))?.label || 'Untagged', ping: p.ping })) };
-  }, [data, counts, activeCat, enriched, factions]);
 
-  async function send(text: string) {
+    const words = query.toLowerCase().split(/[^a-z0-9#]+/).filter(w => w.length >= 2 && !AI_STOPWORDS.has(w));
+    const terms = words.flatMap(w => [w, ...(AI_ALIASES[w] ?? [])]);
+    const relevant = terms.length ? enriched.filter(p => {
+      const f = p.faction === 'WARGA' ? WARGA : factionMap.get(p.faction);
+      const hay = `${p.name} ${f?.label ?? ''} ${f?.short ?? ''}`.toLowerCase();
+      return terms.some(t => hay.includes(t));
+    }) : [];
+
+    const byPing = [...enriched].sort((a, b) => b.ping - a.ping);
+    const picked = new Map<number, EnrichedPlayer>();
+    relevant.slice(0, 150).forEach(p => picked.set(p.id, p));
+    byPing.slice(0, 10).forEach(p => picked.set(p.id, p));      // ping terburuk
+    byPing.slice(-5).forEach(p => picked.set(p.id, p));         // ping terbaik
+    if (relevant.length === 0) enriched.slice(0, 100).forEach(p => picked.set(p.id, p));
+
+    const pings = enriched.map(p => p.ping);
+    return {
+      totalOnline: data.online, maxSlots: data.max, gate: data.gate, updatedAt: data.updatedAt, currentFilter: activeCat,
+      sideCounts: { good: counts.GOOD, bad: counts.BAD, civilian: counts.CIVILIAN },
+      pingStats: pings.length ? { avg: Math.round(pings.reduce((a, b) => a + b, 0) / pings.length), max: Math.max(...pings), min: Math.min(...pings) } : null,
+      factions: factionSummary,
+      note: `Daftar players berisi ${picked.size} dari ${enriched.length} player (yang relevan dengan pertanyaan + ping ekstrem). Ringkasan faction & statistik mencakup semua player.`,
+      players: Array.from(picked.values()).slice(0, 180).map(p => ({ kantong: p.id, nama: p.name, faction: factionLabel(p), ping: p.ping })),
+    };
+  }, [data, counts, activeCat, enriched, factionMap, factionLabel]);
+
+  async function run(history: AiMsg[]) {
+    setSending(true);
+    try {
+      const lastUser = [...history].reverse().find(m => m.role === 'user')?.content ?? '';
+      const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: history, context: buildContext(lastUser) }) });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Gagal');
+      setMsgs([...history, { role: 'assistant', content: json.text }]);
+    } catch (e: any) {
+      setMsgs([...history, { role: 'assistant', content: `⚠ ${e.message}` }]);
+    } finally { setSending(false); }
+  }
+
+  function send(text: string) {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     const next: AiMsg[] = [...msgs, { role: 'user', content: trimmed }];
-    setMsgs(next); setInput(''); setSending(true);
-    try {
-      const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: next, context: buildContext() }) });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Gagal');
-      setMsgs([...next, { role: 'assistant', content: json.text }]);
-    } catch (e: any) { setMsgs([...next, { role: 'assistant', content: `⚠ ${e.message}` }]); } finally { setSending(false); }
+    setMsgs(next); setInput('');
+    run(next);
   }
 
+  function regenerate() {
+    if (sending) return;
+    let lastUserIdx = -1;
+    msgs.forEach((m, i) => { if (m.role === 'user') lastUserIdx = i; });
+    if (lastUserIdx < 0) return;
+    const base = msgs.slice(0, lastUserIdx + 1);
+    setMsgs(base);
+    run(base);
+  }
+
+  async function copyMsg(i: number) {
+    try { await navigator.clipboard.writeText(stripThink(msgs[i].content)); setCopiedIdx(i); setTimeout(() => setCopiedIdx(null), 1500); } catch { /* ignore */ }
+  }
+
+  const clearChat = () => { setMsgs([]); try { sessionStorage.removeItem('ime-ai-chat'); } catch { /* ignore */ } };
+
   const SUGGESTIONS = ['Ringkas siapa saja yang online sekarang', 'Faction apa yang paling banyak online?', 'Siapa saja polisi (LSPD/LSSD) yang online?', 'Ada berapa CC dan siapa nama mereka?', 'Player mana yang pingnya paling buruk?'];
+  const lastAssistantIdx = msgs.length - 1;
 
   return (
     <div className={`fixed inset-0 z-50 ${open ? '' : 'pointer-events-none'}`}>
@@ -968,11 +1684,31 @@ function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factions }
       <aside className={`absolute right-0 top-0 flex h-full w-full flex-col border-l border-line bg-app transition-transform duration-300 sm:w-[440px] ${open ? 'translate-x-0' : 'translate-x-full'}`}>
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15"><SparkIcon className="h-4 w-4 text-accent" /></span><div><div className="text-sm font-semibold text-main">Analisis AI</div><div className="text-[11px] text-subtle">Konteks data realtime</div></div></div>
-          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+          <div className="flex items-center gap-1">
+            {msgs.length > 0 && <button onClick={clearChat} className="rounded-md px-2 py-1 text-[11px] text-subtle transition hover:bg-hover hover:text-main">Hapus chat</button>}
+            <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+          </div>
         </div>
         <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-          {msgs.length === 0 && (<div className="space-y-3"><p className="text-sm text-muted">Tanya apa saja soal server yang lagi online. Contoh:</p><div className="flex flex-col gap-2">{SUGGESTIONS.map(s => (<button key={s} onClick={() => send(s)} className="rounded-lg border border-line bg-card px-3 py-2 text-left text-[13px] text-muted transition hover:border-accent/40 hover:bg-hover hover:text-main">{s}</button>))}</div></div>)}
-          {msgs.map((m, i) => (<div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed ${m.role === 'user' ? 'bg-accent text-accent-text whitespace-pre-wrap' : 'border border-line bg-card text-main'}`}>{m.role === 'user' ? m.content : renderMarkdown(m.content)}</div></div>))}
+          {msgs.length === 0 && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted">Tanya apa saja soal server yang lagi online. Contoh:</p>
+              <div className="flex flex-col gap-2">{SUGGESTIONS.map(s => (<button key={s} onClick={() => send(s)} className="rounded-lg border border-line bg-card px-3 py-2 text-left text-[13px] text-muted transition hover:border-accent/40 hover:bg-hover hover:text-main">{s}</button>))}</div>
+            </div>
+          )}
+          {msgs.map((m, i) => (
+            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className="max-w-[85%]">
+                <div className={`rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed ${m.role === 'user' ? 'bg-accent text-accent-text whitespace-pre-wrap' : 'border border-line bg-card text-main'}`}>{m.role === 'user' ? m.content : renderMarkdown(m.content)}</div>
+                {m.role === 'assistant' && (
+                  <div className="mt-1 flex items-center gap-1 pl-1 text-[11px] text-subtle">
+                    <button onClick={() => copyMsg(i)} className="rounded px-1.5 py-0.5 transition hover:bg-hover hover:text-main">{copiedIdx === i ? '✓ Disalin' : 'Salin'}</button>
+                    {i === lastAssistantIdx && <button onClick={regenerate} disabled={sending} className="rounded px-1.5 py-0.5 transition hover:bg-hover hover:text-main disabled:opacity-40">↻ Regenerate</button>}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
           {sending && (<div className="flex justify-start"><div className="flex gap-1 rounded-xl border border-line bg-card px-3.5 py-3"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '0ms' }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '150ms' }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '300ms' }} /></div></div>)}
         </div>
         <div className="border-t border-line p-3">
@@ -987,10 +1723,32 @@ function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factions }
 }
 
 /* ══════════════ UI Bits & Icons ══════════════ */
-function Stat({ label, value, accent, small }: any) {
-  return (<div className="rounded-xl border border-line bg-card p-4 shadow-sm"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">{label}</div><div className={`mt-1 truncate font-semibold ${accent} ${small ? 'text-base' : 'text-xl'}`}>{value}</div></div>);
+function Stat({ label, value, accent, small, pulse, delta }: { label: string; value: string; accent: string; small?: boolean; pulse?: boolean; delta?: number | null }) {
+  return (
+    <div className="rounded-xl border border-line bg-card p-4 shadow-sm">
+      <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-subtle">
+        {pulse && (
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+          </span>
+        )}
+        {label}
+      </div>
+      <div className="mt-1 flex items-baseline gap-2">
+        <div className={`truncate font-semibold ${accent} ${small ? 'text-base' : 'text-xl'}`}>{value}</div>
+        {delta != null && delta !== 0 && (
+          <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-bold ${delta > 0 ? 'bg-emerald-500/15 text-emerald-500' : 'bg-red-500/15 text-red-500'}`}>{delta > 0 ? `+${delta}` : delta}</span>
+        )}
+      </div>
+    </div>
+  );
 }
-function SearchIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>); }
-function RefreshIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>); }
-function SparkIcon({ className }: any) { return (<svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z" /></svg>); }
-function GearIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>); }
+function SearchIcon({ className }: { className?: string }) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>); }
+function RefreshIcon({ className }: { className?: string }) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>); }
+function SparkIcon({ className }: { className?: string }) { return (<svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z" /></svg>); }
+function StarIcon({ className, filled }: { className?: string; filled?: boolean }) { return (<svg className={className} viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2} strokeLinejoin="round"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9L12 3z" /></svg>); }
+function ClockIcon({ className }: { className?: string }) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>); }
+function DownloadIcon({ className }: { className?: string }) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" /></svg>); }
+function LinkIcon({ className }: { className?: string }) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>); }
+function GearIcon({ className }: { className?: string }) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>); }
