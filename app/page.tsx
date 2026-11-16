@@ -55,7 +55,7 @@ const FACTIONS: FactionDef[] = [
 
 const WARGA: FactionDef = {
   id: 'WARGA', short: 'Untagged', label: 'Untagged',
-  badge: 'bg-hover text-muted border-line', // Menyesuaikan tema
+  badge: 'bg-hover text-muted border-line',
   dot: 'bg-muted',
   match: () => true
 };
@@ -72,7 +72,6 @@ function factionOf(id: string): FactionDef {
 
 /* ══════════════ Utils ══════════════ */
 const PAGE_SIZE = 25;
-const REFRESH_MS = 60_000;
 const fmt = (n: number) => n.toLocaleString('id-ID');
 
 function pingClass(p: number) {
@@ -89,7 +88,6 @@ function formatTime(ms: number) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-/* ══════════════ Markdown Renderer ══════════════ */
 function renderMarkdown(text: string) {
   return text.split('\n').map((line, i) => {
     const parseBold = (str: string) => {
@@ -100,13 +98,11 @@ function renderMarkdown(text: string) {
         return part;
       });
     };
-
     if (line.startsWith('### ') || line.startsWith('## ') || line.startsWith('# ')) {
       const level = line.match(/^#+/)?.[0].length || 1;
       const content = line.replace(/^#+\s+/, '');
       return <div key={i} className={`font-semibold text-main mt-3 mb-1 ${level === 1 ? 'text-base' : 'text-sm'}`}>{content}</div>;
     }
-
     if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
       const content = line.replace(/^[-*]\s+/, '');
       return (
@@ -116,7 +112,6 @@ function renderMarkdown(text: string) {
         </div>
       );
     }
-
     if (!line.trim()) return <div key={i} className="h-2" />;
     return <div key={i} className="my-0.5">{parseBold(line)}</div>;
   });
@@ -134,16 +129,33 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [aiOpen, setAiOpen]     = useState(false);
   
-  // Theme State
+  // Settings State
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light' | 'glass'>('dark');
-  
+  const [refreshMs, setRefreshMs] = useState(60000);
+  const [compactMode, setCompactMode] = useState(false);
+
   // Restart Timer State
   const [countdown, setCountdown] = useState<{ diffMs: number, target: Date } | null>(null);
 
-  // Apply theme
+  // Load Settings from LocalStorage
   useEffect(() => {
+    const savedTheme = localStorage.getItem('ime-theme') as 'dark' | 'light' | 'glass';
+    if (savedTheme) setTheme(savedTheme);
+    const savedRefresh = localStorage.getItem('ime-refresh');
+    if (savedRefresh) setRefreshMs(Number(savedRefresh));
+    const savedCompact = localStorage.getItem('ime-compact');
+    if (savedCompact) setCompactMode(savedCompact === 'true');
+  }, []);
+
+  // Apply Theme
+  useEffect(() => {
+    localStorage.setItem('ime-theme', theme);
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  useEffect(() => { localStorage.setItem('ime-refresh', String(refreshMs)); }, [refreshMs]);
+  useEffect(() => { localStorage.setItem('ime-compact', String(compactMode)); }, [compactMode]);
 
   // Restart Timer Logic (06:00 & 18:00 WIB / UTC+7)
   useEffect(() => {
@@ -192,11 +204,12 @@ export default function Home() {
     }
   }, []);
 
+  // Fetch loop based on refreshMs
   useEffect(() => {
     load();
-    const id = setInterval(load, REFRESH_MS);
+    const id = setInterval(load, refreshMs);
     return () => clearInterval(id);
-  }, [load]);
+  }, [load, refreshMs]);
 
   const enriched = useMemo(
     () => (data?.players ?? []).map(p => ({ ...p, faction: detectFaction(p.name) })),
@@ -245,9 +258,7 @@ export default function Home() {
       {/* ── Floating pill nav ── */}
       <div className="fixed top-3 left-1/2 z-40 w-full max-w-[100vw] -translate-x-1/2 px-3">
         <div className="relative mx-auto max-w-fit">
-          {/* Left Fade */}
           <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-8 bg-gradient-to-r from-app to-transparent rounded-l-full" />
-          
           <div className="no-scrollbar flex items-center gap-1 overflow-x-auto rounded-full border border-line bg-nav px-1.5 py-1.5 shadow-lg backdrop-blur-md">
             {navCats.map(cat => {
               const active = activeCat === cat.id;
@@ -270,8 +281,6 @@ export default function Home() {
               );
             })}
           </div>
-          
-          {/* Right Fade */}
           <div className="pointer-events-none absolute right-0 top-0 z-10 h-full w-8 bg-gradient-to-l from-app to-transparent rounded-r-full" />
         </div>
       </div>
@@ -298,18 +307,14 @@ export default function Home() {
               </div>
             )}
 
-            {/* Theme Dropdown */}
-            <div className="relative group">
-              <button className="flex items-center gap-2 rounded-full border border-line bg-card px-3 py-1.5 text-xs font-medium text-muted transition hover:border-accent/50 hover:text-main">
-                <SunIcon className="h-3.5 w-3.5" />
-                Tema
-              </button>
-              <div className="absolute right-0 top-full mt-2 hidden w-28 flex-col gap-1 rounded-xl border border-line bg-card p-1 shadow-xl group-hover:flex z-50">
-                <button onClick={() => setTheme('dark')} className="rounded-lg px-2 py-1.5 text-left text-xs text-muted hover:bg-hover hover:text-main transition">Dark</button>
-                <button onClick={() => setTheme('light')} className="rounded-lg px-2 py-1.5 text-left text-xs text-muted hover:bg-hover hover:text-main transition">Light</button>
-                <button onClick={() => setTheme('glass')} className="rounded-lg px-2 py-1.5 text-left text-xs text-muted hover:bg-hover hover:text-main transition">Glass</button>
-              </div>
-            </div>
+            {/* Settings Gear Icon */}
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-card text-muted transition-all duration-300 hover:border-accent/50 hover:text-main hover:rotate-90"
+              title="Pengaturan"
+            >
+              <GearIcon className="h-4 w-4" />
+            </button>
 
             <StatusBadge error={error} loading={loading} refreshing={refreshing} />
             
@@ -373,10 +378,10 @@ export default function Home() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-line bg-hover text-left text-[10px] font-semibold uppercase tracking-wider text-subtle">
-                  <th className="w-28 px-4 py-3">Kantong</th>
-                  <th className="px-4 py-3">Nama</th>
-                  <th className="w-20 px-4 py-3 text-right">Ping</th>
+                <tr className={`border-b border-line bg-hover text-left text-[10px] font-semibold uppercase tracking-wider text-subtle ${compactMode ? 'h-9' : 'h-11'}`}>
+                  <th className="w-28 px-4">Kantong</th>
+                  <th className="px-4">Nama</th>
+                  <th className="w-20 px-4 text-right">Ping</th>
                 </tr>
               </thead>
               <tbody>
@@ -389,13 +394,13 @@ export default function Home() {
                 ) : slice.map(p => {
                   const fac = factionOf(p.faction);
                   return (
-                    <tr key={p.id} className="border-b border-line transition hover:bg-hover">
-                      <td className="px-4 py-2.5">
+                    <tr key={p.id} className={`border-b border-line transition hover:bg-hover ${compactMode ? 'h-10' : 'h-14'}`}>
+                      <td className="px-4">
                         <span className="inline-flex items-center rounded-md border border-line bg-app px-2 py-0.5 font-mono text-[11px] font-medium text-main">
                           #{p.id}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-4">
                         <div className="flex items-center gap-2">
                           <span className={`inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold ${fac.badge}`}>
                             {fac.short}
@@ -403,7 +408,7 @@ export default function Home() {
                           <span className="truncate text-[13px] text-main">{p.name}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-2.5 text-right">
+                      <td className="px-4 text-right">
                         <span className={`inline-flex rounded border px-2 py-0.5 font-mono text-[11px] font-medium ${pingClass(p.ping)}`}>
                           {p.ping}
                         </span>
@@ -417,7 +422,7 @@ export default function Home() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted">
-          <div>Auto-refresh 60 detik · {filtered.length} player</div>
+          <div>Auto-refresh {refreshMs/1000} detik · {filtered.length} player</div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setPage(Math.max(0, safePage - 1))}
@@ -439,6 +444,18 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* Modal Settings */}
+      <SettingsModal 
+        open={settingsOpen} 
+        onClose={() => setSettingsOpen(false)}
+        theme={theme}
+        setTheme={setTheme}
+        refreshMs={refreshMs}
+        setRefreshMs={setRefreshMs}
+        compactMode={compactMode}
+        setCompactMode={setCompactMode}
+      />
 
       <AIDrawer
         open={aiOpen}
@@ -479,6 +496,137 @@ function StatusBadge({ error, loading, refreshing }: { error: string | null; loa
   );
 }
 
+/* ══════════════ Settings Modal ══════════════ */
+function SettingsModal({ 
+  open, onClose, theme, setTheme, refreshMs, setRefreshMs, compactMode, setCompactMode 
+}: {
+  open: boolean;
+  onClose: () => void;
+  theme: string;
+  setTheme: (t: any) => void;
+  refreshMs: number;
+  setRefreshMs: (ms: number) => void;
+  compactMode: boolean;
+  setCompactMode: (c: boolean) => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6">
+      <div 
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" 
+        onClick={onClose} 
+      />
+      
+      <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-line bg-card shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
+          <div className="flex items-center gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15">
+              <GearIcon className="h-4 w-4 text-accent" />
+            </span>
+            <div>
+              <div className="text-sm font-semibold text-main">Pengaturan</div>
+              <div className="text-[11px] text-subtle">Sesuaikan tampilan & preferensi</div>
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main">
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="space-y-6 px-5 py-5">
+          
+          {/* Tema */}
+          <div>
+            <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Tema Tampilan</div>
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { id: 'dark', label: 'Dark', bg: 'bg-[#0c0a08]', border: 'border-[#2a2520]', text: 'text-[#ebe3d5]' },
+                { id: 'light', label: 'Light', bg: 'bg-[#f8fafc]', border: 'border-[#e2e8f0]', text: 'text-[#0f172a]' },
+                { id: 'glass', label: 'Glass', bg: 'bg-[#09090b]', border: 'border-white/10', text: 'text-[#f4f4f5]' }
+              ].map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setTheme(t.id)}
+                  className={`group relative flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${
+                    theme === t.id 
+                      ? 'border-accent ring-2 ring-accent/20' 
+                      : 'border-line hover:border-accent/40'
+                  }`}
+                >
+                  <div className={`h-10 w-full rounded-md border ${t.bg} ${t.border} flex items-center justify-center`}>
+                    <div className={`h-1.5 w-6 rounded-full ${theme === t.id ? 'bg-accent' : 'bg-line'}`} />
+                  </div>
+                  <span className={`text-xs font-medium ${theme === t.id ? 'text-accent' : 'text-muted group-hover:text-main'}`}>
+                    {t.label}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <hr className="border-line" />
+
+          {/* Interval Refresh */}
+          <div>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-subtle">Interval Refresh</div>
+              <div className="text-[11px] text-muted">{refreshMs / 1000} detik</div>
+            </div>
+            <div className="flex rounded-lg border border-line bg-app p-1">
+              {[30, 60, 120].map(s => (
+                <button
+                  key={s}
+                  onClick={() => setRefreshMs(s * 1000)}
+                  className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${
+                    refreshMs === s * 1000 
+                      ? 'bg-card text-main shadow-sm' 
+                      : 'text-muted hover:text-main'
+                  }`}
+                >
+                  {s} Detik
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <hr className="border-line" />
+
+          {/* Compact Mode */}
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium text-main">Mode Ringkas</div>
+              <div className="text-[11px] text-muted mt-0.5">Kurangi jarak antar baris tabel agar muat lebih banyak.</div>
+            </div>
+            <button 
+              onClick={() => setCompactMode(!compactMode)}
+              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${compactMode ? 'bg-accent' : 'bg-hover'}`}
+            >
+              <span className={`absolute top-1 left-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${compactMode ? 'translate-x-5' : 'translate-x-0'}`} />
+            </button>
+          </div>
+
+        </div>
+        
+        {/* Footer */}
+        <div className="border-t border-line bg-app px-5 py-3 text-right">
+          <button 
+            onClick={onClose}
+            className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-text transition hover:bg-accent-hover"
+          >
+            Simpan & Tutup
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════ AI Drawer ══════════════ */
 function AIDrawer({
   open, onClose, data, enriched, counts, activeCat
 }: {
@@ -683,10 +831,11 @@ function SparkIcon({ className }: { className?: string }) {
     </svg>
   );
 }
-function SunIcon({ className }: { className?: string }) {
+function GearIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
     </svg>
   );
 }
