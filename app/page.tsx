@@ -17,7 +17,20 @@ const WARGA: FactionDef = { id: 'WARGA', short: 'Untagged', label: 'Untagged', m
 const FALLBACK_FACTIONS: FactionDef[] = [
   { id: 'bmc', label: 'BMC', short: 'BMC', matchType: 'STARTS_WITH', badge: 'bg-[#2a1a2e] text-[#d89ee8] border-[#4a2555]', dot: 'bg-[#c96ce8]' },
   { id: 'cbmc', label: 'CBMC', short: 'CBMC', matchType: 'STARTS_WITH', badge: 'bg-[#2e1a2a] text-[#e89ec9] border-[#55254a]', dot: 'bg-[#e86caa]' },
+  { id: 'sin', label: 'Sinister', short: 'SIN', matchType: 'STARTS_WITH', badge: 'bg-[#1a1a1a] text-[#e0e0e0] border-[#333333]', dot: 'bg-[#888888]' },
+  { id: 'mfl', label: 'Mapendos', short: 'MFL', matchType: 'STARTS_WITH', badge: 'bg-[#2a1a15] text-[#e8b08a] border-[#4a2f25]', dot: 'bg-[#d4885c]' },
+  { id: 'dw', label: 'DW', short: 'DW', matchType: 'STARTS_WITH', badge: 'bg-[#1a2a15] text-[#a0e08a] border-[#2f4a25]', dot: 'bg-[#7ac95c]' },
+  { id: 'rsg', label: 'RSG', short: 'RSG', matchType: 'STARTS_WITH', badge: 'bg-[#2a151a] text-[#e08a9e] border-[#4a2530]', dot: 'bg-[#c95c74]' },
+  { id: 'bdf', label: 'BDF', short: 'BDF', matchType: 'STARTS_WITH', badge: 'bg-[#152a2a] text-[#8ae0e0] border-[#254a4a]', dot: 'bg-[#5cc9c9]' },
+  { id: 'gov', label: 'Government', short: 'GOV', matchType: 'INCLUDES', badge: 'bg-[#1a2f35] text-[#82d8d8] border-[#254a55]', dot: 'bg-[#6ac9d8]' },
+  { id: 'una', label: 'UP N Atom', short: 'UNA', matchType: 'STARTS_WITH', badge: 'bg-[#2a152a] text-[#e08ae0] border-[#4a254a]', dot: 'bg-[#c95cc9]' },
+  { id: '969g', label: '969 Garage', short: '969G', matchType: 'STARTS_WITH', badge: 'bg-[#1a1a2a] text-[#8a9ee0] border-[#25254a]', dot: 'bg-[#5c74c9]' },
+  { id: 'rb', label: 'Queen Beach', short: 'RB', matchType: 'STARTS_WITH', badge: 'bg-[#2a1515] text-[#e08a8a] border-[#4a2525]', dot: 'bg-[#c95c5c]' }
 ];
+
+// Pengelompokan Faction
+const GOOD_SIDE_SHORTS = ['GOV', 'LSPD', 'DOC', 'LSSD', 'MEDIC', 'RH', 'ICR', 'DOJ', '#IME', 'UNA', '969G', 'RB'];
+const BAD_SIDE_SHORTS = ['CC', '4B', 'JRZ', 'HT', 'HTH', 'BURGENK', 'DTF', 'ALLSTAR', 'ALLSTARS', 'NSN', 'WT', '24S', 'OMC', '5TAR', 'MX', 'RCMC', 'RC1', 'BMC', 'CBMC', 'RAGE', 'ALTION', 'NN', 'SIN', 'MFL', 'DW', 'RSG', 'BDF'];
 
 /* ══════════════ Utils ══════════════ */
 const PAGE_SIZE = 25;
@@ -32,13 +45,11 @@ function detectFaction(name: string, factions: FactionDef[]): string {
   const cleanPrefix = prefix.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   const cleanFullName = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
-  // Gabungkan database dengan fallback
   const allFactions = [...factions];
   FALLBACK_FACTIONS.forEach(fb => {
     if (!allFactions.find(f => f.short === fb.short)) allFactions.push(fb);
   });
 
-  // Urutkan dari yang paling panjang (CBMC akan diproses sebelum BMC)
   const sortedFactions = allFactions.sort((a, b) => b.short.length - a.short.length);
 
   for (const f of sortedFactions) {
@@ -83,7 +94,7 @@ export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
   const [refreshMs, setRefreshMs] = useState(60000);
   const [compactMode, setCompactMode] = useState(false);
-  const [tagStyle, setTagStyle] = useState<'pill' | 'widget'>('widget'); // Default ke widget
+  const [tagStyle, setTagStyle] = useState<'pill' | 'widget'>('widget');
 
   useEffect(() => {
     let id = localStorage.getItem('ime-device-id');
@@ -131,17 +142,12 @@ export default function App() {
     return () => clearInterval(interval);
   }, [deviceId]);
 
-  // ══════════ ANTI-SCREENSHOT LOGIC (100% MOBILE SAFE) ══════════
+  // ANTI-SCREENSHOT LOGIC (MOBILE SAFE)
   useEffect(() => {
-    // Blur HANYA jika pindah tab/minimize
     const handleVisibilityChange = () => { 
-      if (document.hidden) {
-        setIsBlurred(true); 
-      } else {
-        setTimeout(() => setIsBlurred(false), 300); 
-      }
+      if (document.hidden) setIsBlurred(true); 
+      else setTimeout(() => setIsBlurred(false), 300); 
     };
-    
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && ['p', 's', 'u'].includes(e.key.toLowerCase())) e.preventDefault();
       if (e.key === 'PrintScreen') {
@@ -155,7 +161,6 @@ export default function App() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('contextmenu', handleContextMenu);
-
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       document.removeEventListener('keydown', handleKeyDown);
@@ -511,7 +516,11 @@ function Home({ isAdmin, refreshMs, compactMode, tagStyle, onOpenSettings, onOpe
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  
+  // State Filter
+  const [activeGroup, setActiveGroup] = useState<'ALL' | 'GOOD' | 'BAD'>('ALL');
   const [activeCat, setActiveCat] = useState<string>('SEMUA');
+  
   const [page, setPage] = useState(0);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -539,7 +548,6 @@ function Home({ isAdmin, refreshMs, compactMode, tagStyle, onOpenSettings, onOpe
 
   useEffect(() => { 
     fetch('/api/factions').then(res => res.json()).then(data => {
-      // Gabungkan dengan fallback
       const merged = [...data];
       FALLBACK_FACTIONS.forEach(fb => {
         if (!merged.find((f: any) => f.short === fb.short)) merged.push(fb);
@@ -579,36 +587,66 @@ function Home({ isAdmin, refreshMs, compactMode, tagStyle, onOpenSettings, onOpe
   useEffect(() => { load(); const id = setInterval(load, refreshMs); return () => clearInterval(id); }, [load, refreshMs]);
 
   const enriched = useMemo(() => (data?.players ?? []).map(p => ({ ...p, faction: detectFaction(p.name, factions) })), [data, factions]);
+  
   const counts = useMemo(() => {
-    const c: Record<string, number> = { SEMUA: enriched.length };
+    const c: Record<string, number> = { SEMUA: enriched.length, GOOD: 0, BAD: 0 };
     for (const f of [...factions, WARGA]) c[f.id] = 0;
-    for (const p of enriched) c[p.faction] = (c[p.faction] ?? 0) + 1;
+    
+    for (const p of enriched) {
+      c[p.faction] = (c[p.faction] ?? 0) + 1;
+      const facShort = factions.find(f => f.id === p.faction)?.short.toUpperCase() || 'WARGA';
+      const isGood = GOOD_SIDE_SHORTS.some(s => facShort.includes(s));
+      const isBad = BAD_SIDE_SHORTS.some(s => facShort.includes(s));
+      if (isGood) c.GOOD++;
+      if (isBad) c.BAD++;
+    }
     return c;
   }, [enriched, factions]);
 
   const filtered = useMemo(() => {
     let list = enriched;
+
+    // 1. Filter by Group (Good/Bad)
+    if (activeGroup !== 'ALL') {
+      list = list.filter(p => {
+        const facShort = factions.find(f => f.id === p.faction)?.short.toUpperCase() || 'WARGA';
+        if (activeGroup === 'GOOD') return GOOD_SIDE_SHORTS.some(s => facShort.includes(s));
+        if (activeGroup === 'BAD') return BAD_SIDE_SHORTS.some(s => facShort.includes(s));
+        return true;
+      });
+    }
+
+    // 2. Filter by Faction (Semua / Spesifik)
     if (activeCat !== 'SEMUA') list = list.filter(p => p.faction === activeCat);
+
+    // 3. Filter by Search
     const q = search.trim().toLowerCase();
     if (q) list = list.filter(p => p.name.toLowerCase().includes(q) || String(p.id).includes(q));
+    
     return list;
-  }, [enriched, activeCat, search]);
+  }, [enriched, activeGroup, activeCat, search, factions]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages - 1);
   const slice = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
   useEffect(() => { if (page !== safePage) setPage(safePage); }, [page, safePage]);
-  useEffect(() => { setPage(0); }, [search, activeCat]);
+  useEffect(() => { setPage(0); }, [search, activeCat, activeGroup]);
 
+  // Filter Nav Items berdasarkan Group yang dipilih
   const navCats = useMemo(() => {
     const items = [
       { id: 'SEMUA', short: 'Semua', dot: 'bg-accent' },
-      ...factions.map(f => ({ id: f.id, short: f.short.split(',')[0], dot: f.dot })), // Tampilkan alias pertama di nav
+      ...factions.filter(f => {
+        if (activeGroup === 'ALL') return true;
+        const isGood = GOOD_SIDE_SHORTS.some(gf => f.short.includes(gf));
+        const isBad = BAD_SIDE_SHORTS.some(bf => f.short.includes(bf));
+        return activeGroup === 'GOOD' ? isGood : isBad;
+      }).map(f => ({ id: f.id, short: f.short.split(',')[0], dot: f.dot })),
       { id: 'WARGA', short: WARGA.short, dot: WARGA.dot }
     ];
-    return items.filter(it => (counts[it.id] ?? 0) > 0 || it.id === activeCat);
-  }, [counts, activeCat, factions]);
+    return items.filter(it => (counts[it.id] ?? 0) > 0 || it.id === activeCat || it.id === 'SEMUA' || it.id === 'WARGA');
+  }, [counts, activeCat, factions, activeGroup]);
 
   const isWarning = countdown && countdown.diffMs < 30 * 60 * 1000;
 
@@ -679,6 +717,57 @@ function Home({ isAdmin, refreshMs, compactMode, tagStyle, onOpenSettings, onOpe
           <Stat label="Terakhir" value={lastFetch ? lastFetch.toLocaleTimeString('id-ID') : '—'} accent="text-muted" small />
         </section>
 
+        {/* ══════════ WIDGET GOOD SIDE vs BAD SIDE ══════════ */}
+        <div className="mb-6 grid grid-cols-2 gap-3">
+          {/* Widget Good Side */}
+          <button 
+            onClick={() => { setActiveGroup(activeGroup === 'GOOD' ? 'ALL' : 'GOOD'); setActiveCat('SEMUA'); }}
+            className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl border p-4 text-left transition-all duration-300 ${
+              activeGroup === 'GOOD' 
+                ? 'border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/50' 
+                : 'border-line bg-card hover:border-emerald-500/30 hover:bg-emerald-500/5'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className={`flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${activeGroup === 'GOOD' ? 'bg-emerald-500 text-white' : 'bg-emerald-500/10 text-emerald-500'}`}>
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+              </div>
+              {activeGroup === 'GOOD' && <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />}
+            </div>
+            <div className="mt-4">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-500">Good Side</div>
+              <div className="mt-1 flex items-baseline gap-2">
+                <span className="text-2xl font-bold text-main">{counts.GOOD}</span>
+                <span className="text-xs text-muted">player online</span>
+              </div>
+            </div>
+          </button>
+
+          {/* Widget Bad Side */}
+          <button 
+            onClick={() => { setActiveGroup(activeGroup === 'BAD' ? 'ALL' : 'BAD'); setActiveCat('SEMUA'); }}
+            className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl border p-4 text-left transition-all duration-300 ${
+              activeGroup === 'BAD' 
+                ? 'border-red-500/50 bg-red-500/10 shadow-[0_0_20px_rgba(239,68,68,0.15)] ring-1 ring-red-500/50' 
+                : 'border-line bg-card hover:border-red-500/30 hover:bg-red-500/5'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className={`flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${activeGroup === 'BAD' ? 'bg-red-500 text-white' : 'bg-red-500/10 text-red-500'}`}>
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+              </div>
+              {activeGroup === 'BAD' && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse" />}
+            </div>
+            <div className="mt-4">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-red-500">Bad Side</div>
+              <div className="mt-1 flex items-baseline gap-2">
+                <span className="text-2xl font-bold text-main">{counts.BAD}</span>
+                <span className="text-xs text-muted">player online</span>
+              </div>
+            </div>
+          </button>
+        </div>
+
         {error && <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">⚠ {error}</div>}
 
         <div className="mb-4 flex flex-col gap-3 sm:flex-row">
@@ -714,7 +803,7 @@ function Home({ isAdmin, refreshMs, compactMode, tagStyle, onOpenSettings, onOpe
                       <td className="px-4">
                         <div className="flex items-center gap-2">
                           
-                          {/* PENGATURAN GAYA TAG (PILL vs WIDGET SOFT UI) */}
+                          {/* WIDGET STYLE BADGE */}
                           {tagStyle === 'pill' ? (
                             <div className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${fac.badge}`}>
                               <span className={`h-1.5 w-1.5 rounded-full ${fac.dot}`} />
@@ -851,7 +940,7 @@ function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factions }
     if (!data) return null;
     const factionSummary: any = {};
     for (const [id, count] of Object.entries(counts)) {
-      if (id === 'SEMUA' || !count) continue;
+      if (id === 'SEMUA' || id === 'GOOD' || id === 'BAD' || !count) continue;
       const f = id === 'WARGA' ? WARGA : factions.find((x: any) => x.id === id);
       factionSummary[id] = { label: f?.label || 'Unknown', count };
     }
