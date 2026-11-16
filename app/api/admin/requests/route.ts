@@ -1,27 +1,34 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
-import { jwtVerify } from 'jose';
 
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'fallback-secret-hans-ime');
-
-async function isAdmin(req: Request) {
-  const token = req.headers.get('cookie')?.split('; ').find(c => c.startsWith('admin_token='))?.split('=')[1];
-  if (!token) return false;
-  try {
-    await jwtVerify(token, JWT_SECRET);
-    return true;
-  } catch { return false; }
-}
-
-export async function GET(req: Request) {
-  if (!(await isAdmin(req))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export async function GET() {
   const requests = await prisma.accessRequest.findMany({ orderBy: { createdAt: 'desc' } });
   return NextResponse.json(requests);
 }
 
 export async function PATCH(req: Request) {
-  if (!(await isAdmin(req))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const { id, status } = await req.json();
-  await prisma.accessRequest.update({ where: { id }, data: { status } });
+  const { id, action } = await req.json();
+  
+  const data: any = {};
+  
+  if (action === 'APPROVE') data.status = 'APPROVED';
+  if (action === 'REVOKE') data.status = 'PENDING';
+  if (action === 'BAN') data.status = 'BANNED';
+  if (action === 'REJECT') data.status = 'REJECTED';
+  
+  if (action === 'TIMEOUT_1H') {
+    data.timeoutUntil = new Date(Date.now() + 60 * 60 * 1000);
+  } else if (action === 'TIMEOUT_1D') {
+    data.timeoutUntil = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  } else if (action === 'CLEAR_TIMEOUT') {
+    data.timeoutUntil = null;
+    data.status = 'APPROVED';
+  }
+
+  await prisma.accessRequest.update({
+    where: { id },
+    data
+  });
+
   return NextResponse.json({ success: true });
 }
