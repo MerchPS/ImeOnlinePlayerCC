@@ -20,8 +20,8 @@ type FactionDef = {
   id: string;
   short: string;
   label: string;
-  badge: string;   // tailwind classes
-  dot: string;     // warna dot di nav
+  badge: string;
+  dot: string;
   match: (p: string) => boolean;
 };
 
@@ -55,8 +55,8 @@ const FACTIONS: FactionDef[] = [
 
 const WARGA: FactionDef = {
   id: 'WARGA', short: 'Untagged', label: 'Untagged',
-  badge: 'bg-[#252320] text-[#a09889] border-[#3a3630]',
-  dot: 'bg-[#8f8578]',
+  badge: 'bg-hover text-muted border-line', // Menyesuaikan tema
+  dot: 'bg-muted',
   match: () => true
 };
 
@@ -76,9 +76,17 @@ const REFRESH_MS = 60_000;
 const fmt = (n: number) => n.toLocaleString('id-ID');
 
 function pingClass(p: number) {
-  if (p < 80)  return 'bg-[#1a2418] text-[#9dd88c] border-[#2a3a25]';
-  if (p < 150) return 'bg-[#2a2015] text-[#dcc878] border-[#4a3a25]';
-  return 'bg-[#2a1512] text-[#e09b7a] border-[#4a2520]';
+  if (p < 80)  return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
+  if (p < 150) return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
+  return 'bg-red-500/10 text-red-500 border-red-500/20';
+}
+
+function formatTime(ms: number) {
+  const totalSecs = Math.floor(ms / 1000);
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = totalSecs % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
 /* ══════════════ Markdown Renderer ══════════════ */
@@ -87,7 +95,7 @@ function renderMarkdown(text: string) {
     const parseBold = (str: string) => {
       return str.split(/(\*\*.*?\*\*)/g).map((part, j) => {
         if (part.startsWith('**') && part.endsWith('**')) {
-          return <strong key={j} className="font-semibold text-[#d4a574]">{part.slice(2, -2)}</strong>;
+          return <strong key={j} className="font-semibold text-accent">{part.slice(2, -2)}</strong>;
         }
         return part;
       });
@@ -96,21 +104,20 @@ function renderMarkdown(text: string) {
     if (line.startsWith('### ') || line.startsWith('## ') || line.startsWith('# ')) {
       const level = line.match(/^#+/)?.[0].length || 1;
       const content = line.replace(/^#+\s+/, '');
-      return <div key={i} className={`font-semibold text-[#ebe3d5] mt-3 mb-1 ${level === 1 ? 'text-base' : 'text-sm'}`}>{content}</div>;
+      return <div key={i} className={`font-semibold text-main mt-3 mb-1 ${level === 1 ? 'text-base' : 'text-sm'}`}>{content}</div>;
     }
 
     if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
       const content = line.replace(/^[-*]\s+/, '');
       return (
         <div key={i} className="flex gap-2 ml-1 my-0.5">
-          <span className="text-[#5a554c]">•</span>
+          <span className="text-subtle">•</span>
           <span>{parseBold(content)}</span>
         </div>
       );
     }
 
     if (!line.trim()) return <div key={i} className="h-2" />;
-
     return <div key={i} className="my-0.5">{parseBold(line)}</div>;
   });
 }
@@ -126,6 +133,47 @@ export default function Home() {
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [aiOpen, setAiOpen]     = useState(false);
+  
+  // Theme State
+  const [theme, setTheme] = useState<'dark' | 'light' | 'glass'>('dark');
+  
+  // Restart Timer State
+  const [countdown, setCountdown] = useState<{ diffMs: number, target: Date } | null>(null);
+
+  // Apply theme
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  // Restart Timer Logic (06:00 & 18:00 WIB / UTC+7)
+  useEffect(() => {
+    const updateTimer = () => {
+      const now = new Date();
+      const wibOffset = 7 * 60 * 60 * 1000;
+      const nowWib = new Date(now.getTime() + wibOffset);
+      const h = nowWib.getUTCHours();
+
+      let targetWib = new Date(nowWib);
+      targetWib.setUTCHours(0, 0, 0, 0);
+
+      if (h < 6) {
+        targetWib.setUTCHours(6, 0, 0, 0);
+      } else if (h < 18) {
+        targetWib.setUTCHours(18, 0, 0, 0);
+      } else {
+        targetWib.setUTCDate(targetWib.getUTCDate() + 1);
+        targetWib.setUTCHours(6, 0, 0, 0);
+      }
+
+      const diffMs = targetWib.getTime() - nowWib.getTime();
+      const targetReal = new Date(targetWib.getTime() - wibOffset);
+      setCountdown({ diffMs, target: targetReal });
+    };
+
+    updateTimer();
+    const id = setInterval(updateTimer, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -183,60 +231,91 @@ export default function Home() {
 
   const navCats = useMemo(() => {
     const items = [
-      { id: 'SEMUA', short: 'Semua', dot: 'bg-[#d4a574]' },
+      { id: 'SEMUA', short: 'Semua', dot: 'bg-accent' },
       ...FACTIONS.map(f => ({ id: f.id, short: f.short, dot: f.dot })),
       { id: 'WARGA', short: WARGA.short, dot: WARGA.dot }
     ];
     return items.filter(it => (counts[it.id] ?? 0) > 0 || it.id === activeCat);
   }, [counts, activeCat]);
 
+  const isWarning = countdown && countdown.diffMs < 30 * 60 * 1000;
+
   return (
-    <main className="min-h-screen bg-[#0c0a08] text-[#ebe3d5]">
+    <main className="min-h-screen bg-app text-main">
       {/* ── Floating pill nav ── */}
-      <div className="fixed top-3 left-1/2 z-40 max-w-[calc(100vw-24px)] -translate-x-1/2">
-        <div className="no-scrollbar flex items-center gap-1 overflow-x-auto rounded-full border border-[#2a2520] bg-[#15120f]/95 px-1.5 py-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)] backdrop-blur-md">
-          {navCats.map(cat => {
-            const active = activeCat === cat.id;
-            return (
-              <button
-                key={cat.id}
-                onClick={() => setActiveCat(cat.id)}
-                className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
-                  active
-                    ? 'bg-[#d4a574] text-[#0c0a08]'
-                    : 'text-[#8a8073] hover:bg-[#1c1815] hover:text-[#ebe3d5]'
-                }`}
-              >
-                <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-[#0c0a08]' : cat.dot}`} />
-                <span>{cat.short}</span>
-                <span className={`text-[10px] ${active ? 'text-[#0c0a08]/70' : 'text-[#5a554c]'}`}>
-                  {counts[cat.id] ?? 0}
-                </span>
-              </button>
-            );
-          })}
+      <div className="fixed top-3 left-1/2 z-40 w-full max-w-[100vw] -translate-x-1/2 px-3">
+        <div className="relative mx-auto max-w-fit">
+          {/* Left Fade */}
+          <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-8 bg-gradient-to-r from-app to-transparent rounded-l-full" />
+          
+          <div className="no-scrollbar flex items-center gap-1 overflow-x-auto rounded-full border border-line bg-nav px-1.5 py-1.5 shadow-lg backdrop-blur-md">
+            {navCats.map(cat => {
+              const active = activeCat === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setActiveCat(cat.id)}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
+                    active
+                      ? 'bg-accent text-accent-text shadow-md'
+                      : 'text-muted hover:bg-hover hover:text-main'
+                  }`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-accent-text' : cat.dot}`} />
+                  <span>{cat.short}</span>
+                  <span className={`text-[10px] ${active ? 'text-accent-text/70' : 'text-subtle'}`}>
+                    {counts[cat.id] ?? 0}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          
+          {/* Right Fade */}
+          <div className="pointer-events-none absolute right-0 top-0 z-10 h-full w-8 bg-gradient-to-l from-app to-transparent rounded-r-full" />
         </div>
       </div>
 
       <div className="mx-auto max-w-5xl px-4 pb-16 pt-20 sm:px-6">
-        <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-[#5a554c]">
+            <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-subtle">
               IME Roleplay
             </div>
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
               Player Monitor
             </h1>
-            <p className="mt-1 text-sm text-[#8a8073]">
+            <p className="mt-1 text-sm text-muted">
               Pantau siapa saja yang sedang bermain sekarang
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {countdown && (
+              <div className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-mono transition-colors ${isWarning ? 'border-red-500/50 bg-red-500/10 text-red-500' : 'border-line bg-card text-muted'}`}>
+                <span>Restart dalam</span>
+                <span className="font-bold">{formatTime(countdown.diffMs)}</span>
+              </div>
+            )}
+
+            {/* Theme Dropdown */}
+            <div className="relative group">
+              <button className="flex items-center gap-2 rounded-full border border-line bg-card px-3 py-1.5 text-xs font-medium text-muted transition hover:border-accent/50 hover:text-main">
+                <SunIcon className="h-3.5 w-3.5" />
+                Tema
+              </button>
+              <div className="absolute right-0 top-full mt-2 hidden w-28 flex-col gap-1 rounded-xl border border-line bg-card p-1 shadow-xl group-hover:flex z-50">
+                <button onClick={() => setTheme('dark')} className="rounded-lg px-2 py-1.5 text-left text-xs text-muted hover:bg-hover hover:text-main transition">Dark</button>
+                <button onClick={() => setTheme('light')} className="rounded-lg px-2 py-1.5 text-left text-xs text-muted hover:bg-hover hover:text-main transition">Light</button>
+                <button onClick={() => setTheme('glass')} className="rounded-lg px-2 py-1.5 text-left text-xs text-muted hover:bg-hover hover:text-main transition">Glass</button>
+              </div>
+            </div>
+
             <StatusBadge error={error} loading={loading} refreshing={refreshing} />
+            
             <button
               onClick={() => setAiOpen(true)}
-              className="group flex items-center gap-2 rounded-full border border-[#3a3025] bg-[#1c1815] px-4 py-2 text-xs font-medium text-[#d4a574] transition hover:border-[#d4a574]/50 hover:bg-[#221d18]"
+              className="group flex items-center gap-2 rounded-full border border-line bg-card px-4 py-1.5 text-xs font-medium text-accent transition hover:border-accent/50 hover:bg-hover"
             >
               <SparkIcon className="h-3.5 w-3.5" />
               Tanya AI
@@ -244,45 +323,57 @@ export default function Home() {
           </div>
         </header>
 
+        {/* ⚠️ Restart Warning Banner */}
+        {isWarning && (
+          <div className="mb-6 flex items-start sm:items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500 animate-pulse">
+            <svg className="h-5 w-5 shrink-0 mt-0.5 sm:mt-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div>
+              <span className="font-bold tracking-wide">PERINGATAN BADAI:</span> Server akan direstart dalam <span className="font-mono font-bold">{formatTime(countdown.diffMs)}</span>. Segera cari tempat aman dan simpan progress roleplay kamu!
+            </div>
+          </div>
+        )}
+
         <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Stat label="Online"       value={data ? fmt(data.online) : '—'} accent="text-[#9dd88c]" />
-          <Stat label="Max Slots"    value={data ? fmt(data.max)    : '—'} accent="text-[#82aed8]" />
-          <Stat label="Gate"         value={data?.gate ?? '—'}             accent="text-[#d4a574]" small />
-          <Stat label="Terakhir"     value={lastFetch ? lastFetch.toLocaleTimeString('id-ID') : '—'} accent="text-[#a09889]" small />
+          <Stat label="Online"       value={data ? fmt(data.online) : '—'} accent="text-emerald-500" />
+          <Stat label="Max Slots"    value={data ? fmt(data.max)    : '—'} accent="text-blue-500" />
+          <Stat label="Gate"         value={data?.gate ?? '—'}             accent="text-accent" small />
+          <Stat label="Terakhir"     value={lastFetch ? lastFetch.toLocaleTimeString('id-ID') : '—'} accent="text-muted" small />
         </section>
 
         {error && (
-          <div className="mb-4 rounded-lg border border-[#5a2f25] bg-[#2a1512] px-4 py-3 text-sm text-[#e09b7a]">
+          <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
             ⚠ {error}
           </div>
         )}
 
         <div className="mb-4 flex flex-wrap gap-3">
           <div className="relative min-w-[220px] flex-1">
-            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5a554c]" />
+            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
             <input
               type="search"
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Cari nama atau kantong…"
-              className="w-full rounded-lg border border-[#2a2520] bg-[#15120f] py-2.5 pl-10 pr-4 text-sm text-[#ebe3d5] placeholder-[#5a554c] outline-none transition focus:border-[#d4a574]/50 focus:ring-2 focus:ring-[#d4a574]/15"
+              className="w-full rounded-lg border border-line bg-card py-2.5 pl-10 pr-4 text-sm text-main placeholder-subtle outline-none transition focus:border-accent/50 focus:ring-2 focus:ring-accent/15"
             />
           </div>
           <button
             onClick={load}
             disabled={refreshing}
-            className="inline-flex items-center gap-2 rounded-lg border border-[#2a2520] bg-[#15120f] px-4 py-2.5 text-sm font-medium text-[#ebe3d5] transition hover:border-[#d4a574]/40 disabled:opacity-40"
+            className="inline-flex items-center gap-2 rounded-lg border border-line bg-card px-4 py-2.5 text-sm font-medium text-main transition hover:border-accent/40 disabled:opacity-40"
           >
             <RefreshIcon className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-[#2a2520] bg-[#12100e]">
+        <div className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-[#2a2520] bg-[#15120f] text-left text-[10px] font-semibold uppercase tracking-wider text-[#5a554c]">
+                <tr className="border-b border-line bg-hover text-left text-[10px] font-semibold uppercase tracking-wider text-subtle">
                   <th className="w-28 px-4 py-3">Kantong</th>
                   <th className="px-4 py-3">Nama</th>
                   <th className="w-20 px-4 py-3 text-right">Ping</th>
@@ -290,17 +381,17 @@ export default function Home() {
               </thead>
               <tbody>
                 {loading && !data ? (
-                  <tr><td colSpan={3} className="px-4 py-16 text-center text-[#5a554c]">Memuat data…</td></tr>
+                  <tr><td colSpan={3} className="px-4 py-16 text-center text-subtle">Memuat data…</td></tr>
                 ) : slice.length === 0 ? (
-                  <tr><td colSpan={3} className="px-4 py-16 text-center text-[#5a554c]">
+                  <tr><td colSpan={3} className="px-4 py-16 text-center text-subtle">
                     {filtered.length ? 'Tidak ada hasil.' : 'Tidak ada player di kategori ini.'}
                   </td></tr>
                 ) : slice.map(p => {
                   const fac = factionOf(p.faction);
                   return (
-                    <tr key={p.id} className="border-b border-[#1e1b17] transition hover:bg-[#16130f]">
+                    <tr key={p.id} className="border-b border-line transition hover:bg-hover">
                       <td className="px-4 py-2.5">
-                        <span className="inline-flex items-center rounded-md border border-[#3a3630] bg-[#252320] px-2 py-0.5 font-mono text-[11px] font-medium text-[#ebe3d5]">
+                        <span className="inline-flex items-center rounded-md border border-line bg-app px-2 py-0.5 font-mono text-[11px] font-medium text-main">
                           #{p.id}
                         </span>
                       </td>
@@ -309,7 +400,7 @@ export default function Home() {
                           <span className={`inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold ${fac.badge}`}>
                             {fac.short}
                           </span>
-                          <span className="truncate text-[13px] text-[#ebe3d5]">{p.name}</span>
+                          <span className="truncate text-[13px] text-main">{p.name}</span>
                         </div>
                       </td>
                       <td className="px-4 py-2.5 text-right">
@@ -325,23 +416,23 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-[#5a554c]">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted">
           <div>Auto-refresh 60 detik · {filtered.length} player</div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setPage(Math.max(0, safePage - 1))}
               disabled={safePage <= 0}
-              className="rounded-md border border-[#2a2520] bg-[#15120f] px-3 py-1.5 font-medium text-[#ebe3d5] transition hover:border-[#d4a574]/40 disabled:opacity-30"
+              className="rounded-md border border-line bg-card px-3 py-1.5 font-medium text-main transition hover:border-accent/40 disabled:opacity-30"
             >
               ← Prev
             </button>
-            <span className="min-w-[52px] text-center font-mono text-[#a09889]">
+            <span className="min-w-[52px] text-center font-mono text-muted">
               {safePage + 1}/{totalPages}
             </span>
             <button
               onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))}
               disabled={safePage >= totalPages - 1}
-              className="rounded-md border border-[#2a2520] bg-[#15120f] px-3 py-1.5 font-medium text-[#ebe3d5] transition hover:border-[#d4a574]/40 disabled:opacity-30"
+              className="rounded-md border border-line bg-card px-3 py-1.5 font-medium text-main transition hover:border-accent/40 disabled:opacity-30"
             >
               Next →
             </button>
@@ -365,8 +456,8 @@ export default function Home() {
 
 function Stat({ label, value, accent, small }: { label: string; value: string; accent: string; small?: boolean }) {
   return (
-    <div className="rounded-lg border border-[#2a2520] bg-[#12100e] p-4">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-[#5a554c]">{label}</div>
+    <div className="rounded-xl border border-line bg-card p-4 shadow-sm">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">{label}</div>
       <div className={`mt-1 truncate font-semibold ${accent} ${small ? 'text-base' : 'text-xl'}`}>{value}</div>
     </div>
   );
@@ -375,13 +466,13 @@ function Stat({ label, value, accent, small }: { label: string; value: string; a
 function StatusBadge({ error, loading, refreshing }: { error: string | null; loading: boolean; refreshing: boolean }) {
   const state = error ? 'err' : loading ? 'wait' : 'ok';
   const map = {
-    ok:   { dot: 'bg-[#9dd88c]', text: 'text-[#9dd88c]', label: 'Live' },
-    wait: { dot: 'bg-[#d4a574]', text: 'text-[#d4a574]', label: 'Memuat' },
-    err:  { dot: 'bg-[#e09b7a]', text: 'text-[#e09b7a]', label: 'Offline' }
+    ok:   { dot: 'bg-emerald-500', text: 'text-emerald-500', label: 'Live' },
+    wait: { dot: 'bg-amber-500', text: 'text-amber-500', label: 'Memuat' },
+    err:  { dot: 'bg-red-500', text: 'text-red-500', label: 'Offline' }
   } as const;
   const s = map[state];
   return (
-    <div className="flex items-center gap-2 rounded-full border border-[#2a2520] bg-[#15120f] px-3 py-1.5 text-[11px]">
+    <div className="flex items-center gap-2 rounded-full border border-line bg-card px-3 py-1.5 text-[11px]">
       <span className={`h-1.5 w-1.5 rounded-full ${s.dot} ${refreshing ? 'animate-pulse' : ''}`} />
       <span className={s.text}>{s.label}</span>
     </div>
@@ -470,21 +561,21 @@ function AIDrawer({
         className={`absolute inset-0 bg-black/50 transition-opacity ${open ? 'opacity-100' : 'opacity-0'}`}
       />
       <aside
-        className={`absolute right-0 top-0 flex h-full w-full flex-col border-l border-[#2a2520] bg-[#0f0d0a] transition-transform duration-300 sm:w-[440px] ${
+        className={`absolute right-0 top-0 flex h-full w-full flex-col border-l border-line bg-app transition-transform duration-300 sm:w-[440px] ${
           open ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
-        <div className="flex items-center justify-between border-b border-[#2a2520] px-5 py-4">
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#d4a574]/15">
-              <SparkIcon className="h-4 w-4 text-[#d4a574]" />
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15">
+              <SparkIcon className="h-4 w-4 text-accent" />
             </span>
             <div>
-              <div className="text-sm font-semibold">Analisis AI</div>
-              <div className="text-[11px] text-[#5a554c]">Punya konteks data player realtime</div>
+              <div className="text-sm font-semibold text-main">Analisis AI</div>
+              <div className="text-[11px] text-subtle">Punya konteks data player realtime</div>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-md p-1.5 text-[#5a554c] transition hover:bg-[#1c1815] hover:text-[#ebe3d5]">
+          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main">
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -494,7 +585,7 @@ function AIDrawer({
         <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
           {msgs.length === 0 && (
             <div className="space-y-3">
-              <p className="text-sm text-[#8a8073]">
+              <p className="text-sm text-muted">
                 Tanya apa saja soal server yang lagi online. Contoh:
               </p>
               <div className="flex flex-col gap-2">
@@ -502,7 +593,7 @@ function AIDrawer({
                   <button
                     key={s}
                     onClick={() => send(s)}
-                    className="rounded-lg border border-[#2a2520] bg-[#15120f] px-3 py-2 text-left text-[13px] text-[#8a8073] transition hover:border-[#d4a574]/40 hover:bg-[#1a1714] hover:text-[#ebe3d5]"
+                    className="rounded-lg border border-line bg-card px-3 py-2 text-left text-[13px] text-muted transition hover:border-accent/40 hover:bg-hover hover:text-main"
                   >
                     {s}
                   </button>
@@ -516,8 +607,8 @@ function AIDrawer({
               <div
                 className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
                   m.role === 'user'
-                    ? 'bg-[#d4a574] text-[#0c0a08] whitespace-pre-wrap'
-                    : 'border border-[#2a2520] bg-[#15120f] text-[#ebe3d5]'
+                    ? 'bg-accent text-accent-text whitespace-pre-wrap'
+                    : 'border border-line bg-card text-main'
                 }`}
               >
                 {m.role === 'user' ? m.content : renderMarkdown(m.content)}
@@ -527,16 +618,16 @@ function AIDrawer({
 
           {sending && (
             <div className="flex justify-start">
-              <div className="flex gap-1 rounded-xl border border-[#2a2520] bg-[#15120f] px-3.5 py-3">
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#5a554c]" style={{ animationDelay: '0ms' }} />
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#5a554c]" style={{ animationDelay: '150ms' }} />
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#5a554c]" style={{ animationDelay: '300ms' }} />
+              <div className="flex gap-1 rounded-xl border border-line bg-card px-3.5 py-3">
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '0ms' }} />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '150ms' }} />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '300ms' }} />
               </div>
             </div>
           )}
         </div>
 
-        <div className="border-t border-[#2a2520] p-3">
+        <div className="border-t border-line p-3">
           <form
             onSubmit={e => { e.preventDefault(); send(input); }}
             className="flex gap-2"
@@ -552,12 +643,12 @@ function AIDrawer({
               }}
               placeholder="Tanya soal player, faction, ping…"
               rows={1}
-              className="flex-1 resize-none rounded-lg border border-[#2a2520] bg-[#15120f] px-3 py-2 text-[13px] text-[#ebe3d5] placeholder-[#5a554c] outline-none transition focus:border-[#d4a574]/50 focus:ring-2 focus:ring-[#d4a574]/15"
+              className="flex-1 resize-none rounded-lg border border-line bg-card px-3 py-2 text-[13px] text-main placeholder-subtle outline-none transition focus:border-accent/50 focus:ring-2 focus:ring-accent/15"
             />
             <button
               type="submit"
               disabled={sending || !input.trim()}
-              className="flex shrink-0 items-center justify-center rounded-lg bg-[#d4a574] px-3 text-[#0c0a08] transition hover:bg-[#e0b88a] disabled:opacity-30"
+              className="flex shrink-0 items-center justify-center rounded-lg bg-accent px-3 text-accent-text transition hover:bg-accent-hover disabled:opacity-30"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
@@ -570,6 +661,7 @@ function AIDrawer({
   );
 }
 
+/* ─── Icons ─── */
 function SearchIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -588,6 +680,13 @@ function SparkIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor">
       <path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z" />
+    </svg>
+  );
+}
+function SunIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
     </svg>
   );
 }
