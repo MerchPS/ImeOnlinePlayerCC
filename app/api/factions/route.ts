@@ -21,7 +21,7 @@ const DEFAULT_FACTIONS = [
   { label: 'Burgenk', short: 'BURGENK', matchType: 'INCLUDES', badge: 'bg-[#2a1a25] text-[#d882b0] border-[#4a2540]', dot: 'bg-[#c95c90]' },
   { label: 'DTF', short: 'DTF', matchType: 'INCLUDES', badge: 'bg-[#1a2525] text-[#82d8d8] border-[#254a4a]', dot: 'bg-[#6ac9c9]' },
   
-  // ALLSTAR & ALLSTARS (Dipisah koma)
+  // ALLSTAR & ALLSTARS
   { label: 'Allstars', short: 'ALLSTAR,ALLSTARS', matchType: 'INCLUDES', badge: 'bg-[#25251a] text-[#d8d882] border-[#4a4a25]', dot: 'bg-[#c9c95c]' },
   
   { label: 'NSN', short: 'NSN', matchType: 'INCLUDES', badge: 'bg-[#351a2a] text-[#d882b0] border-[#552540]', dot: 'bg-[#c95c90]' },
@@ -34,6 +34,11 @@ const DEFAULT_FACTIONS = [
   // RCMC & RC1
   { label: 'RCMC', short: 'RCMC,RC1', matchType: 'INCLUDES', badge: 'bg-[#35251a] text-[#d8a082] border-[#553a25]', dot: 'bg-[#c9805c]' },
   
+  // ⬇️ TAMBAHAN BMC & CBMC ⬇️
+  { label: 'BMC', short: 'BMC', matchType: 'STARTS_WITH', badge: 'bg-[#2a1a2e] text-[#d89ee8] border-[#4a2555]', dot: 'bg-[#c96ce8]' },
+  { label: 'CBMC', short: 'CBMC', matchType: 'STARTS_WITH', badge: 'bg-[#2e1a2a] text-[#e89ec9] border-[#55254a]', dot: 'bg-[#e86caa]' },
+  // ⬆️ TAMBAHAN BMC & CBMC ⬆️
+
   { label: 'RAGE', short: 'RAGE', matchType: 'STARTS_WITH', badge: 'bg-[#351a1a] text-[#d88282] border-[#552525]', dot: 'bg-[#c95c5c]' },
   { label: 'Altion', short: 'ALTION', matchType: 'INCLUDES', badge: 'bg-[#1a352a] text-[#82d8b0] border-[#254a40]', dot: 'bg-[#5cc990]' },
   { label: 'NN', short: 'NN', matchType: 'STARTS_WITH', badge: 'bg-[#251a35] text-[#a082d8] border-[#352555]', dot: 'bg-[#805cc9]' }
