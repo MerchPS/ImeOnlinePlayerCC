@@ -16,7 +16,7 @@ const DEFAULT_FACTIONS = [
   { label: 'Helper', short: 'IME', matchType: 'INCLUDES', badge: 'bg-[#1a2f35] text-[#7ad8e0] border-[#254a55]', dot: 'bg-[#6ac9d8]' },
   { label: 'Burgenk', short: 'Burgenk', matchType: 'INCLUDES', badge: 'bg-[#2a1a25] text-[#d882b0] border-[#4a2540]', dot: 'bg-[#c95c90]' },
   { label: 'DTF', short: 'DTF', matchType: 'INCLUDES', badge: 'bg-[#1a2525] text-[#82d8d8] border-[#254a4a]', dot: 'bg-[#6ac9c9]' },
-  { label: 'Allstars', short: 'Allstars', matchType: 'INCLUDES', badge: 'bg-[#25251a] text-[#d8d882] border-[#4a4a25]', dot: 'bg-[#c9c95c]' },
+  { label: 'Allstar', short: 'Allstar', matchType: 'INCLUDES', badge: 'bg-[#25251a] text-[#d8d882] border-[#4a4a25]', dot: 'bg-[#c9c95c]' },
   { label: 'NSN', short: 'NSN', matchType: 'INCLUDES', badge: 'bg-[#351a2a] text-[#d882b0] border-[#552540]', dot: 'bg-[#c95c90]' },
   { label: 'WT', short: 'WT', matchType: 'STARTS_WITH', badge: 'bg-[#1a3525] text-[#82d8a0] border-[#254a35]', dot: 'bg-[#6ac980]' },
   { label: '24S', short: '24S', matchType: 'INCLUDES', badge: 'bg-[#2a1a1a] text-[#d88282] border-[#4a2525]', dot: 'bg-[#c95c5c]' },
