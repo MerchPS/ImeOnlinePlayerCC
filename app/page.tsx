@@ -163,7 +163,6 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, s
 function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
   const [activeTab, setActiveTab] = useState<'requests' | 'factions' | 'audit'>('requests');
   
-  // Requests State
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('ALL');
@@ -172,11 +171,8 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
   const [reasonInput, setReasonInput] = useState('');
   const [durationInput, setDurationInput] = useState('60');
 
-  // Factions State
   const [factions, setFactions] = useState<FactionDef[]>([]);
   const [newFaction, setNewFaction] = useState({ label: '', short: '', matchType: 'INCLUDES', badge: 'bg-gray-500/10 text-gray-500 border-gray-500/20', dot: 'bg-gray-500' });
-
-  // Audit State
   const [logs, setLogs] = useState<AuditLog[]>([]);
 
   const fetchData = useCallback(async () => {
@@ -428,7 +424,6 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
         </div>
       </div>
 
-      {/* Modal Input Alasan Ban/Timeout */}
       {actionModal && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-line bg-card p-5 shadow-2xl">
@@ -480,7 +475,7 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
   const [compactMode, setCompactMode] = useState(false);
   const [countdown, setCountdown] = useState<{ diffMs: number, target: Date } | null>(null);
 
-  // Drag to scroll logic for PC
+  // Drag to scroll logic
   const navRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
@@ -501,6 +496,20 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
     const walk = (x - startX) * 2;
     navRef.current.scrollLeft = scrollLeft - walk;
   };
+  // Mouse Wheel to horizontal scroll
+  const onWheel = (e: React.WheelEvent) => {
+    if (navRef.current) {
+      navRef.current.scrollLeft += e.deltaY;
+    }
+  };
+
+  // Auto scroll to active item
+  useEffect(() => {
+    const activeEl = navRef.current?.querySelector('[data-active="true"]') as HTMLElement;
+    if (activeEl) {
+      activeEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  }, [activeCat]);
 
   useEffect(() => {
     fetch('/api/factions').then(res => res.json()).then(setFactions);
@@ -614,10 +623,13 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
 
   return (
     <main className="min-h-screen bg-app text-main">
-      {/* Nav Bar dengan fitur Drag-to-Scroll & Scrollbar tipis untuk PC */}
+      
+      {/* ── Premium Floating Nav Bar ── */}
       <div className="fixed top-3 left-0 right-0 z-40 flex justify-center px-3">
-        <div className="relative w-full max-w-5xl">
-          <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-6 bg-gradient-to-r from-app to-transparent rounded-l-full" />
+        <div className="relative w-full max-w-5xl overflow-hidden rounded-full">
+          
+          {/* Left Blur/Fade Mask */}
+          <div className="pointer-events-none absolute left-0 top-0 z-20 h-full w-12 bg-gradient-to-r from-app via-app/80 to-transparent rounded-l-full backdrop-blur-[2px]" />
           
           <div 
             ref={navRef}
@@ -625,27 +637,33 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
             onMouseLeave={onMouseLeave}
             onMouseUp={onMouseUp}
             onMouseMove={onMouseMove}
-            className={`custom-scrollbar flex items-center gap-1 overflow-x-auto rounded-full border border-line bg-nav px-1.5 py-1.5 shadow-lg backdrop-blur-md ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+            onWheel={onWheel}
+            className={`no-scrollbar flex items-center gap-1 overflow-x-auto rounded-full border border-line bg-nav px-3 py-1.5 shadow-[0_4px_30px_rgba(0,0,0,0.3)] backdrop-blur-xl ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
           >
             {navCats.map(cat => {
               const active = activeCat === cat.id;
               return (
                 <button
                   key={cat.id}
+                  data-active={active}
                   onClick={() => setActiveCat(cat.id)}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
-                    active ? 'bg-accent text-accent-text shadow-md' : 'text-muted hover:bg-hover hover:text-main'
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-300 ${
+                    active 
+                      ? 'bg-accent text-accent-text shadow-[0_0_12px_var(--accent)]' 
+                      : 'text-muted hover:bg-hover hover:text-main'
                   }`}
                 >
-                  <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-accent-text' : cat.dot}`} />
+                  <span className={`h-1.5 w-1.5 rounded-full transition-colors ${active ? 'bg-accent-text' : cat.dot}`} />
                   <span>{cat.short}</span>
-                  <span className={`text-[10px] ${active ? 'text-accent-text/70' : 'text-subtle'}`}>{counts[cat.id] ?? 0}</span>
+                  <span className={`text-[10px] ${active ? 'text-accent-text/80' : 'text-subtle'}`}>{counts[cat.id] ?? 0}</span>
                 </button>
               );
             })}
           </div>
           
-          <div className="pointer-events-none absolute right-0 top-0 z-10 h-full w-6 bg-gradient-to-l from-app to-transparent rounded-r-full" />
+          {/* Right Blur/Fade Mask */}
+          <div className="pointer-events-none absolute right-0 top-0 z-20 h-full w-12 bg-gradient-to-l from-app via-app/80 to-transparent rounded-r-full backdrop-blur-[2px]" />
+          
         </div>
       </div>
 
