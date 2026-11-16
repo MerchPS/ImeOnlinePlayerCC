@@ -20,12 +20,15 @@ function pingClass(p: number) { if (p < 80) return 'bg-emerald-500/10 text-emera
 function formatTime(ms: number) { const totalSecs = Math.floor(ms / 1000); const h = Math.floor(totalSecs / 3600); const m = Math.floor((totalSecs % 3600) / 60); const s = totalSecs % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
 function formatDate(iso: string) { return new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }); }
 
+// PERBAIKAN: Mengurutkan faction dari yang terpanjang agar MEDIC tidak tertukar dengan CC
 function detectFaction(name: string, factions: FactionDef[]): string {
   const prefix = name.split(' - ')[0].trim();
   const cleanPrefix = prefix.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   const cleanFullName = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
-  for (const f of factions) {
+  const sortedFactions = [...factions].sort((a, b) => b.short.length - a.short.length);
+
+  for (const f of sortedFactions) {
     const cleanShort = f.short.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
     if (!cleanShort) continue;
 
@@ -113,15 +116,8 @@ export default function App() {
     return () => clearInterval(interval);
   }, [deviceId]);
 
-  // ══════════ ANTI-SCREENSHOT LOGIC (DOUBLE LAYER) ══════════
+  // ══════════ ANTI-SCREENSHOT LOGIC (Tanpa Watermark) ══════════
   useEffect(() => {
-    // LAYER 1: Inject library Anti-Screenshot PRO
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/gh/Lovsan/anti-screenshot-PRO@main/anti-screenshot.js';
-    script.async = true;
-    document.body.appendChild(script);
-
-    // LAYER 2: React Native Blur & Keyboard Protection
     const handleVisibilityChange = () => {
       if (document.hidden) setIsBlurred(true);
       else setTimeout(() => setIsBlurred(false), 300);
@@ -135,12 +131,14 @@ export default function App() {
         e.preventDefault();
       }
       if (e.key === 'PrintScreen') {
-        navigator.clipboard.writeText('⚠️ Screenshot dilarang! Device ID Anda telah dicatat oleh sistem IME Roleplay.');
+        navigator.clipboard.writeText('⚠️ Screenshot dilarang!');
         setIsBlurred(true);
         setTimeout(() => setIsBlurred(false), 2000);
       }
     };
 
+    const handleTouchStart = () => setIsBlurred(true);
+    const handleTouchEnd = () => setTimeout(() => setIsBlurred(false), 800);
     const handleContextMenu = (e: MouseEvent) => e.preventDefault();
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -149,15 +147,18 @@ export default function App() {
     window.addEventListener('pagehide', handlePageHide);
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('contextmenu', handleContextMenu);
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: true });
 
     return () => {
-      document.body.removeChild(script);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('pagehide', handlePageHide);
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('contextmenu', handleContextMenu);
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchend', handleTouchEnd);
     };
   }, []);
 
@@ -179,11 +180,8 @@ export default function App() {
   return (
     <div className="relative min-h-screen bg-app text-main overflow-hidden">
       
-      {/* Watermark (Z-Index Tertinggi, TIDAK Terkena Blur) */}
-      <Watermark deviceId={deviceId} />
-
       {/* Konten Utama (Akan Terkena Blur saat Screenshot) */}
-      <div className={`transition-all duration-300 ease-out ${isBlurred ? 'blur-[24px] scale-[0.98] opacity-30 pointer-events-none' : ''}`}>
+      <div className={`transition-all duration-300 ease-out ${isBlurred ? 'blur-[30px] scale-[0.95] opacity-10 pointer-events-none' : ''}`}>
         <Home 
           isAdmin={authStatus === 'ADMIN'} 
           refreshMs={refreshMs} 
@@ -202,27 +200,6 @@ export default function App() {
         currentCompact={compactMode}
         onSave={handleSaveSettings}
       />
-    </div>
-  );
-}
-
-/* ══════════════ Watermark Component ══════════════ */
-function Watermark({ deviceId }: { deviceId: string }) {
-  const [time, setTime] = useState(new Date().toLocaleTimeString('id-ID'));
-  useEffect(() => {
-    const int = setInterval(() => setTime(new Date().toLocaleTimeString('id-ID')), 1000);
-    return () => clearInterval(int);
-  }, []);
-
-  const text = `IME ROLEPLAY • ID: ${deviceId.slice(0, 8)} • ${time}`;
-  
-  return (
-    <div className="pointer-events-none fixed inset-0 z-[9999] flex flex-wrap items-center justify-center overflow-hidden opacity-[0.06] select-none">
-      {Array.from({ length: 60 }).map((_, i) => (
-        <div key={i} className="text-lg sm:text-2xl font-bold -rotate-45 p-4 sm:p-8 whitespace-nowrap text-main">
-          {text}
-        </div>
-      ))}
     </div>
   );
 }
@@ -606,7 +583,7 @@ function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: 
   const [factions, setFactions] = useState<FactionDef[]>([]);
   const [countdown, setCountdown] = useState<{ diffMs: number, target: Date } | null>(null);
 
-  // Drag to scroll logic untuk Dynamic Island
+  // Drag to scroll logic
   const navRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
