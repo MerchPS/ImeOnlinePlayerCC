@@ -21,6 +21,16 @@ model AccessRequest {
   deviceId     String    @unique
   status       String    @default("PENDING") // PENDING, APPROVED, REJECTED, BANNED
   timeoutUntil DateTime?
+  reason       String?   // <-- BARU: Alasan ban/timeout
   lastActive   DateTime  @default(now())
   createdAt    DateTime  @default(now())
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  adminName      String   @default("Hans")
+  action         String
+  targetDeviceId String
+  details        String?
+  createdAt      DateTime @default(now())
 }
