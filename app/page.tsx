@@ -259,13 +259,50 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
                       <td className="px-4 py-4 text-muted text-xs">
                         {new Date(r.lastActive).toLocaleString('id-ID')}
                       </td>
+                      
+                      {/* KOLOM AKSI DENGAN FITUR UNTIMEOUT & UNBAN */}
                       <td className="px-4 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {r.status !== 'APPROVED' && <button onClick={() => updateStatus(r.id, 'APPROVE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-2 py-1 rounded text-xs font-medium">Approve</button>}
-                          {r.status === 'APPROVED' && <button onClick={() => updateStatus(r.id, 'REVOKE')} className="bg-hover text-muted hover:text-main px-2 py-1 rounded text-xs font-medium">Revoke</button>}
-                          <div className="h-4 w-px bg-line mx-1" />
-                          <button onClick={() => updateStatus(r.id, 'TIMEOUT_1H')} className="text-orange-500 hover:bg-orange-500/10 px-2 py-1 rounded text-xs font-medium" title="Timeout 1 Jam">1H</button>
-                          <button onClick={() => updateStatus(r.id, 'BAN')} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-xs font-medium">Ban</button>
+                          
+                          {/* Jika Banned, tampilkan tombol Unban */}
+                          {r.status === 'BANNED' ? (
+                            <button onClick={() => updateStatus(r.id, 'REVOKE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-3 py-1 rounded text-xs font-medium transition">
+                              Unban
+                            </button>
+                          
+                          /* Jika Timeout, tampilkan tombol Hapus Timeout */
+                          ) : r.timeoutUntil && new Date(r.timeoutUntil) > new Date() ? (
+                            <button onClick={() => updateStatus(r.id, 'CLEAR_TIMEOUT')} className="bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 px-3 py-1 rounded text-xs font-medium transition">
+                              Hapus Timeout
+                            </button>
+                          
+                          /* Jika Normal, tampilkan Approve/Revoke, Timeout, Ban */
+                          ) : (
+                            <>
+                              {r.status !== 'APPROVED' && (
+                                <button onClick={() => updateStatus(r.id, 'APPROVE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-2 py-1 rounded text-xs font-medium transition">
+                                  Approve
+                                </button>
+                              )}
+                              
+                              {r.status === 'APPROVED' && (
+                                <button onClick={() => updateStatus(r.id, 'REVOKE')} className="bg-hover text-muted hover:text-main px-2 py-1 rounded text-xs font-medium transition">
+                                  Revoke
+                                </button>
+                              )}
+                              
+                              <div className="h-4 w-px bg-line mx-1" />
+                              
+                              <button onClick={() => updateStatus(r.id, 'TIMEOUT_1H')} className="text-orange-500 hover:bg-orange-500/10 px-2 py-1 rounded text-xs font-medium transition" title="Beri waktu jeda 1 Jam">
+                                1H
+                              </button>
+                              
+                              <button onClick={() => updateStatus(r.id, 'BAN')} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-xs font-medium transition">
+                                Ban
+                              </button>
+                            </>
+                          )}
+
                         </div>
                       </td>
                     </tr>
