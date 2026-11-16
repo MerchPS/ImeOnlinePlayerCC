@@ -93,7 +93,7 @@ export default function App() {
   );
 }
 
-/* ══════════════ Lock Screen (Rate Limiter Handled) ══════════════ */
+/* ══════════════ Lock Screen ══════════════ */
 function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, status: string, meta: any, onRefresh: () => void }) {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -104,7 +104,7 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, s
     const res = await fetch('/api/auth/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId }) });
     if (res.status === 429) {
       const data = await res.json();
-      setErrorMsg(data.error); // Menampilkan "Tunggu X detik..."
+      setErrorMsg(data.error);
     } else {
       onRefresh();
     }
@@ -159,7 +159,7 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, s
   );
 }
 
-/* ══════════════ Admin Panel (Factions & Requests) ══════════════ */
+/* ══════════════ Admin Panel ══════════════ */
 function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
   const [activeTab, setActiveTab] = useState<'requests' | 'factions' | 'audit'>('requests');
   
@@ -480,7 +480,28 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
   const [compactMode, setCompactMode] = useState(false);
   const [countdown, setCountdown] = useState<{ diffMs: number, target: Date } | null>(null);
 
-  // Fetch Factions
+  // Drag to scroll logic for PC
+  const navRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [startX, setStartX] = useState(0);
+  const [scrollLeft, setScrollLeft] = useState(0);
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (!navRef.current) return;
+    setIsDragging(true);
+    setStartX(e.pageX - navRef.current.offsetLeft);
+    setScrollLeft(navRef.current.scrollLeft);
+  };
+  const onMouseLeave = () => setIsDragging(false);
+  const onMouseUp = () => setIsDragging(false);
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging || !navRef.current) return;
+    e.preventDefault();
+    const x = e.pageX - navRef.current.offsetLeft;
+    const walk = (x - startX) * 2;
+    navRef.current.scrollLeft = scrollLeft - walk;
+  };
+
   useEffect(() => {
     fetch('/api/factions').then(res => res.json()).then(setFactions);
   }, []);
@@ -501,7 +522,6 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
   useEffect(() => { localStorage.setItem('ime-refresh', String(refreshMs)); }, [refreshMs]);
   useEffect(() => { localStorage.setItem('ime-compact', String(compactMode)); }, [compactMode]);
 
-  // Fetch pending count for Admin Badge
   useEffect(() => {
     if (!isAdmin) return;
     const fetchPending = async () => {
@@ -594,10 +614,19 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
 
   return (
     <main className="min-h-screen bg-app text-main">
+      {/* Nav Bar dengan fitur Drag-to-Scroll & Scrollbar tipis untuk PC */}
       <div className="fixed top-3 left-0 right-0 z-40 flex justify-center px-3">
-        <div className="relative w-full max-w-fit">
-          <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-8 bg-gradient-to-r from-app to-transparent rounded-l-full" />
-          <div className="no-scrollbar flex items-center gap-1 overflow-x-auto rounded-full border border-line bg-nav px-1.5 py-1.5 shadow-lg backdrop-blur-md">
+        <div className="relative w-full max-w-5xl">
+          <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-6 bg-gradient-to-r from-app to-transparent rounded-l-full" />
+          
+          <div 
+            ref={navRef}
+            onMouseDown={onMouseDown}
+            onMouseLeave={onMouseLeave}
+            onMouseUp={onMouseUp}
+            onMouseMove={onMouseMove}
+            className={`custom-scrollbar flex items-center gap-1 overflow-x-auto rounded-full border border-line bg-nav px-1.5 py-1.5 shadow-lg backdrop-blur-md ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+          >
             {navCats.map(cat => {
               const active = activeCat === cat.id;
               return (
@@ -615,7 +644,8 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
               );
             })}
           </div>
-          <div className="pointer-events-none absolute right-0 top-0 z-10 h-full w-8 bg-gradient-to-l from-app to-transparent rounded-r-full" />
+          
+          <div className="pointer-events-none absolute right-0 top-0 z-10 h-full w-6 bg-gradient-to-l from-app to-transparent rounded-r-full" />
         </div>
       </div>
 
