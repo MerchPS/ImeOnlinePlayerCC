@@ -20,7 +20,7 @@ function pingClass(p: number) { if (p < 80) return 'bg-emerald-500/10 text-emera
 function formatTime(ms: number) { const totalSecs = Math.floor(ms / 1000); const h = Math.floor(totalSecs / 3600); const m = Math.floor((totalSecs % 3600) / 60); const s = totalSecs % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
 function formatDate(iso: string) { return new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }); }
 
-// FUNGSI SAKTI: Menghapus simbol aneh, mendukung koma (RCMC,RC1 / ALLSTAR,ALLSTARS)
+// FUNGSI SAKTI: Menghapus simbol aneh, mendukung koma (RCMC,RC1 / ALLSTAR,ALLSTARS / BMC,CBMC)
 function detectFaction(name: string, factions: FactionDef[]): string {
   const prefix = name.split(' - ')[0].trim();
   const cleanPrefix = prefix.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
@@ -71,7 +71,7 @@ export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
   const [refreshMs, setRefreshMs] = useState(60000);
   const [compactMode, setCompactMode] = useState(false);
-  const [tagStyle, setTagStyle] = useState<'pill' | 'widget'>('pill'); // State Baru untuk Gaya Tag
+  const [tagStyle, setTagStyle] = useState<'pill' | 'widget'>('pill'); // State untuk Gaya Tag
 
   useEffect(() => {
     let id = localStorage.getItem('ime-device-id');
@@ -119,17 +119,19 @@ export default function App() {
     return () => clearInterval(interval);
   }, [deviceId]);
 
-  // ══════════ ANTI-SCREENSHOT LOGIC (FIXED FOR MOBILE) ══════════
+  // ══════════ ANTI-SCREENSHOT LOGIC (100% MOBILE SAFE) ══════════
   useEffect(() => {
-    // 1. Blur jika pindah tab / minimize (Buka Recent Apps)
-    const handleVisibilityChange = () => { if (document.hidden) setIsBlurred(true); else setTimeout(() => setIsBlurred(false), 300); };
+    // HANYA Blur jika pindah tab / minimize aplikasi (Buka Recent Apps)
+    // Event window.blur dan touchstart DIHAPUS agar scroll/klik di HP tidak ngeblur
+    const handleVisibilityChange = () => { 
+      if (document.hidden) {
+        setIsBlurred(true); 
+      } else {
+        setTimeout(() => setIsBlurred(false), 300); 
+      }
+    };
     
-    // 2. Blur jika jendela kehilangan fokus (Buka Snipping Tool / Alt+Tab)
-    const handleBlur = () => setIsBlurred(true);
-    const handleFocus = () => setTimeout(() => setIsBlurred(false), 300);
-    const handlePageHide = () => setIsBlurred(true);
-    
-    // 3. Blokir PrintScreen & Shortcut (Hanya PC)
+    // Blokir PrintScreen & Shortcut (Hanya PC)
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && ['p', 's', 'u'].includes(e.key.toLowerCase())) e.preventDefault();
       if (e.key === 'PrintScreen') {
@@ -141,17 +143,11 @@ export default function App() {
     const handleContextMenu = (e: MouseEvent) => e.preventDefault();
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleBlur);
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('pagehide', handlePageHide);
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('contextmenu', handleContextMenu);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleBlur);
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('pagehide', handlePageHide);
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('contextmenu', handleContextMenu);
     };
