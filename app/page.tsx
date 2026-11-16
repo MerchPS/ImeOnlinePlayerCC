@@ -20,7 +20,7 @@ function pingClass(p: number) { if (p < 80) return 'bg-emerald-500/10 text-emera
 function formatTime(ms: number) { const totalSecs = Math.floor(ms / 1000); const h = Math.floor(totalSecs / 3600); const m = Math.floor((totalSecs % 3600) / 60); const s = totalSecs % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
 function formatDate(iso: string) { return new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }); }
 
-// PERBAIKAN: Mendukung Multiple Aliases (RCMC,RC1) & Mengurutkan dari yang terpanjang (HTH sebelum HT)
+// PERBAIKAN: Mendukung Multiple Aliases (RCMC,RC1), menghapus simbol %, & Mengurutkan dari yang terpanjang (HTH sebelum HT)
 function detectFaction(name: string, factions: FactionDef[]): string {
   const prefix = name.split(' - ')[0].trim();
   
@@ -28,11 +28,11 @@ function detectFaction(name: string, factions: FactionDef[]): string {
   const cleanPrefix = prefix.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   const cleanFullName = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
-  // Urutkan dari yang paling panjang
+  // Urutkan dari yang paling panjang (HTH akan diproses sebelum HT)
   const sortedFactions = [...factions].sort((a, b) => b.short.length - a.short.length);
 
   for (const f of sortedFactions) {
-    // Pisahkan alias berdasarkan koma (misal: "RCMC,RC1")
+    // Pisahkan alias berdasarkan koma (misal: "RCMC,RC1" jadi ["RCMC", "RC1"])
     const aliases = f.short.split(',').map(s => s.replace(/[^a-zA-Z0-9]/g, '').toUpperCase());
     
     for (const alias of aliases) {
@@ -73,7 +73,7 @@ export default function App() {
   // Anti-Screenshot State
   const [isBlurred, setIsBlurred] = useState(false);
 
-  // Theme & Settings State (Lifted to App)
+  // Theme & Settings State
   const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
   const [refreshMs, setRefreshMs] = useState(60000);
   const [compactMode, setCompactMode] = useState(false);
@@ -631,7 +631,7 @@ function Home({ isAdmin, refreshMs, compactMode, onOpenSettings, onOpenAdmin }: 
         <header className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-subtle">IME Roleplay</div>
-            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Player Monitors</h1>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Player Monitor</h1>
             <p className="mt-1 text-sm text-muted">Pantau siapa saja yang sedang bermain sekarang</p>
           </div>
 
