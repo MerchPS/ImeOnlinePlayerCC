@@ -21,8 +21,8 @@ const DEFAULT_FACTIONS = [
   { label: 'Burgenk', short: 'BURGENK', matchType: 'INCLUDES', badge: 'bg-[#2a1a25] text-[#d882b0] border-[#4a2540]', dot: 'bg-[#c95c90]' },
   { label: 'DTF', short: 'DTF', matchType: 'INCLUDES', badge: 'bg-[#1a2525] text-[#82d8d8] border-[#254a4a]', dot: 'bg-[#6ac9c9]' },
   
-  // ALLSTAR & ALLSTARS
-  { label: 'Allstars', short: 'ALLSTAR', matchType: 'INCLUDES', badge: 'bg-[#25251a] text-[#d8d882] border-[#4a4a25]', dot: 'bg-[#c9c95c]' },
+  // ALLSTAR & ALLSTARS (Dipisah koma)
+  { label: 'Allstars', short: 'ALLSTAR,ALLSTARS', matchType: 'INCLUDES', badge: 'bg-[#25251a] text-[#d8d882] border-[#4a4a25]', dot: 'bg-[#c9c95c]' },
   
   { label: 'NSN', short: 'NSN', matchType: 'INCLUDES', badge: 'bg-[#351a2a] text-[#d882b0] border-[#552540]', dot: 'bg-[#c95c90]' },
   { label: 'WT', short: 'WT', matchType: 'STARTS_WITH', badge: 'bg-[#1a3525] text-[#82d8a0] border-[#254a35]', dot: 'bg-[#6ac980]' },
@@ -42,17 +42,12 @@ const DEFAULT_FACTIONS = [
 export async function GET() {
   let factions = await prisma.faction.findMany({ orderBy: { createdAt: 'asc' } });
   
-  if (factions.length === 0) {
-    // Jika benar-benar kosong, masukkan semua
-    await prisma.faction.createMany({ data: DEFAULT_FACTIONS });
-  } else {
-    // AUTO-SYNC: Jika database sudah ada isinya, cek faction mana yang belum ada, lalu tambahkan
-    const existingShorts = factions.map(f => f.short);
-    const missingFactions = DEFAULT_FACTIONS.filter(df => !existingShorts.includes(df.short));
-    
-    if (missingFactions.length > 0) {
-      await prisma.faction.createMany({ data: missingFactions });
-    }
+  // AUTO-SYNC: Cek faction yang belum ada di DB, lalu tambahkan otomatis
+  const existingShorts = factions.map(f => f.short);
+  const missingFactions = DEFAULT_FACTIONS.filter(df => !existingShorts.includes(df.short));
+  
+  if (missingFactions.length > 0) {
+    await prisma.faction.createMany({ data: missingFactions });
   }
   
   // Ambil data terbaru setelah sinkronisasi
