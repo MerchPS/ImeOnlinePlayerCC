@@ -2,46 +2,54 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 
 const DEFAULT_FACTIONS = [
-  { label: 'Crimson Creed', short: 'CC', matchType: 'INCLUDES', badge: 'bg-[#3a1f1a] text-[#e09b7a] border-[#5a2f25]', dot: 'bg-[#c97a5c]' },
+  // ==========================================
+  // ⬇️ GOOD SIDE WIDGETS ⬇️
+  // ==========================================
+  { label: 'Government', short: 'GOV', matchType: 'INCLUDES', badge: 'bg-[#1a2f35] text-[#82d8d8] border-[#254a55]', dot: 'bg-[#6ac9d8]' },
   { label: 'Polisi Kota', short: 'LSPD', matchType: 'INCLUDES', badge: 'bg-[#1a2535] text-[#82aed8] border-[#253a55]', dot: 'bg-[#6a9dd8]' },
-  { label: '4Bloods', short: '4B', matchType: 'INCLUDES', badge: 'bg-[#2f1a1a] text-[#d47878] border-[#4a2525]', dot: 'bg-[#c95c5c]' },
   { label: 'Department Of Correction', short: 'DOC', matchType: 'INCLUDES', badge: 'bg-[#252525] text-[#b0b0b0] border-[#3a3a3a]', dot: 'bg-[#a0a0a0]' },
   { label: 'Serif', short: 'LSSD', matchType: 'INCLUDES', badge: 'bg-[#2f2a1a] text-[#dcc878] border-[#4a4525]', dot: 'bg-[#c9b05c]' },
   { label: 'Dokter Kota', short: 'MEDIC', matchType: 'INCLUDES', badge: 'bg-[#25302a] text-[#9dd88c] border-[#3a4a35]', dot: 'bg-[#8cc97a]' },
   { label: 'Roxwood Hospital', short: 'RH', matchType: 'INCLUDES', badge: 'bg-[#1a2f2a] text-[#7ad8b0] border-[#254a3f]', dot: 'bg-[#6ac9a0]' },
   { label: 'Mekanik IME', short: 'ICR', matchType: 'INCLUDES', badge: 'bg-[#3a2f1a] text-[#dcc878] border-[#5a4a25]', dot: 'bg-[#c9a95c]' },
   { label: 'Department Of Justice', short: 'DOJ', matchType: 'INCLUDES', badge: 'bg-[#2a1f35] text-[#b48fd8] border-[#3f2f55]', dot: 'bg-[#a07ac9]' },
-  { label: 'Jeruzalem', short: 'JRZ', matchType: 'INCLUDES', badge: 'bg-[#3a351a] text-[#dcd478] border-[#5a5525]', dot: 'bg-[#c9c05c]' },
+  { label: 'Helper', short: '#IME', matchType: 'INCLUDES', badge: 'bg-[#1a2f35] text-[#7ad8e0] border-[#254a55]', dot: 'bg-[#6ac9d8]' },
   
-  // HT & HTH
+  // New Good Side / Neutral
+  { label: 'UP N Atom', short: 'UNA', matchType: 'STARTS_WITH', badge: 'bg-[#2a152a] text-[#e08ae0] border-[#4a254a]', dot: 'bg-[#c95cc9]' },
+  { label: '969 Garage', short: '969G', matchType: 'STARTS_WITH', badge: 'bg-[#1a1a2a] text-[#8a9ee0] border-[#25254a]', dot: 'bg-[#5c74c9]' },
+  { label: 'Queen Beach', short: 'RB', matchType: 'STARTS_WITH', badge: 'bg-[#2a1515] text-[#e08a8a] border-[#4a2525]', dot: 'bg-[#c95c5c]' },
+
+  // ==========================================
+  // ⬇️ BAD SIDE WIDGETS ⬇️
+  // ==========================================
+  { label: 'Crimson Creed', short: 'CC', matchType: 'INCLUDES', badge: 'bg-[#3a1f1a] text-[#e09b7a] border-[#5a2f25]', dot: 'bg-[#c97a5c]' },
+  { label: '4Bloods', short: '4B', matchType: 'INCLUDES', badge: 'bg-[#2f1a1a] text-[#d47878] border-[#4a2525]', dot: 'bg-[#c95c5c]' },
+  { label: 'Jeruzalem', short: 'JRZ', matchType: 'INCLUDES', badge: 'bg-[#3a351a] text-[#dcd478] border-[#5a5525]', dot: 'bg-[#c9c05c]' },
   { label: 'HighTable', short: 'HT', matchType: 'STARTS_WITH', badge: 'bg-[#2a2515] text-[#e0b88a] border-[#453f25]', dot: 'bg-[#d4a574]' },
   { label: 'HTH', short: 'HTH', matchType: 'STARTS_WITH', badge: 'bg-[#252515] text-[#e0e08a] border-[#454525]', dot: 'bg-[#d4d474]' },
-  
-  { label: 'Helper', short: '#IME', matchType: 'INCLUDES', badge: 'bg-[#1a2f35] text-[#7ad8e0] border-[#254a55]', dot: 'bg-[#6ac9d8]' },
   { label: 'Burgenk', short: 'BURGENK', matchType: 'INCLUDES', badge: 'bg-[#2a1a25] text-[#d882b0] border-[#4a2540]', dot: 'bg-[#c95c90]' },
   { label: 'DTF', short: 'DTF', matchType: 'INCLUDES', badge: 'bg-[#1a2525] text-[#82d8d8] border-[#254a4a]', dot: 'bg-[#6ac9c9]' },
-  
-  // ALLSTAR & ALLSTARS
   { label: 'Allstars', short: 'ALLSTAR,ALLSTARS', matchType: 'INCLUDES', badge: 'bg-[#25251a] text-[#d8d882] border-[#4a4a25]', dot: 'bg-[#c9c95c]' },
-  
   { label: 'NSN', short: 'NSN', matchType: 'INCLUDES', badge: 'bg-[#351a2a] text-[#d882b0] border-[#552540]', dot: 'bg-[#c95c90]' },
   { label: 'WT', short: 'WT', matchType: 'STARTS_WITH', badge: 'bg-[#1a3525] text-[#82d8a0] border-[#254a35]', dot: 'bg-[#6ac980]' },
   { label: '24S', short: '24S', matchType: 'INCLUDES', badge: 'bg-[#2a1a1a] text-[#d88282] border-[#4a2525]', dot: 'bg-[#c95c5c]' },
   { label: 'OMC', short: 'OMC', matchType: 'INCLUDES', badge: 'bg-[#1a2a35] text-[#82b0d8] border-[#254055]', dot: 'bg-[#5c90c9]' },
   { label: '5TAR', short: '5TAR', matchType: 'INCLUDES', badge: 'bg-[#352a1a] text-[#d8b082] border-[#554025]', dot: 'bg-[#c9905c]' },
   { label: 'MX', short: 'MX', matchType: 'STARTS_WITH', badge: 'bg-[#2a1a35] text-[#b082d8] border-[#402555]', dot: 'bg-[#905cc9]' },
-  
-  // RCMC & RC1
   { label: 'RCMC', short: 'RCMC,RC1', matchType: 'INCLUDES', badge: 'bg-[#35251a] text-[#d8a082] border-[#553a25]', dot: 'bg-[#c9805c]' },
-  
-  // ⬇️ TAMBAHAN BMC & CBMC ⬇️
   { label: 'BMC', short: 'BMC', matchType: 'STARTS_WITH', badge: 'bg-[#2a1a2e] text-[#d89ee8] border-[#4a2555]', dot: 'bg-[#c96ce8]' },
   { label: 'CBMC', short: 'CBMC', matchType: 'STARTS_WITH', badge: 'bg-[#2e1a2a] text-[#e89ec9] border-[#55254a]', dot: 'bg-[#e86caa]' },
-  // ⬆️ TAMBAHAN BMC & CBMC ⬆️
-
   { label: 'RAGE', short: 'RAGE', matchType: 'STARTS_WITH', badge: 'bg-[#351a1a] text-[#d88282] border-[#552525]', dot: 'bg-[#c95c5c]' },
   { label: 'Altion', short: 'ALTION', matchType: 'INCLUDES', badge: 'bg-[#1a352a] text-[#82d8b0] border-[#254a40]', dot: 'bg-[#5cc990]' },
-  { label: 'NN', short: 'NN', matchType: 'STARTS_WITH', badge: 'bg-[#251a35] text-[#a082d8] border-[#352555]', dot: 'bg-[#805cc9]' }
+  { label: 'NN', short: 'NN', matchType: 'STARTS_WITH', badge: 'bg-[#251a35] text-[#a082d8] border-[#352555]', dot: 'bg-[#805cc9]' },
+  
+  // New Bad Side
+  { label: 'Sinister', short: 'SIN', matchType: 'STARTS_WITH', badge: 'bg-[#1a1a1a] text-[#e0e0e0] border-[#333333]', dot: 'bg-[#888888]' },
+  { label: 'Mapendos', short: 'MFL', matchType: 'STARTS_WITH', badge: 'bg-[#2a1a15] text-[#e8b08a] border-[#4a2f25]', dot: 'bg-[#d4885c]' },
+  { label: 'DW', short: 'DW', matchType: 'STARTS_WITH', badge: 'bg-[#1a2a15] text-[#a0e08a] border-[#2f4a25]', dot: 'bg-[#7ac95c]' },
+  { label: 'RSG', short: 'RSG', matchType: 'STARTS_WITH', badge: 'bg-[#2a151a] text-[#e08a9e] border-[#4a2530]', dot: 'bg-[#c95c74]' },
+  { label: 'BDF', short: 'BDF', matchType: 'STARTS_WITH', badge: 'bg-[#152a2a] text-[#8ae0e0] border-[#254a4a]', dot: 'bg-[#5cc9c9]' },
 ];
 
 export async function GET() {
