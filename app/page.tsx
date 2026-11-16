@@ -14,6 +14,7 @@ type ApiData = {
   updatedAt: string;
   error?: string;
 };
+type AuthStatus = 'LOADING' | 'UNAUTHORIZED' | 'PENDING' | 'APPROVED' | 'ADMIN';
 
 /* ══════════════ Faction system ══════════════ */
 type FactionDef = {
@@ -117,8 +118,191 @@ function renderMarkdown(text: string) {
   });
 }
 
-/* ══════════════ Main ══════════════ */
-export default function Home() {
+/* ══════════════ Main App ══════════════ */
+export default function App() {
+  const [authStatus, setAuthStatus] = useState<AuthStatus>('LOADING');
+  const [deviceId, setDeviceId] = useState<string>('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+
+  // Initialize Device ID
+  useEffect(() => {
+    let id = localStorage.getItem('ime-device-id');
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem('ime-device-id', id);
+    }
+    setDeviceId(id);
+  }, []);
+
+  // Check Auth Status
+  useEffect(() => {
+    if (!deviceId) return;
+    const checkAuth = async () => {
+      try {
+        const res = await fetch(`/api/auth/status?deviceId=${deviceId}`);
+        const json = await res.json();
+        setAuthStatus(json.status);
+      } catch {
+        setAuthStatus('UNAUTHORIZED');
+      }
+    };
+    checkAuth();
+    const interval = setInterval(checkAuth, 10000); // Cek tiap 10 detik jika PENDING
+    return () => clearInterval(interval);
+  }, [deviceId]);
+
+  if (authStatus === 'LOADING') {
+    return <div className="flex min-h-screen items-center justify-center bg-app text-main">Memuat...</div>;
+  }
+
+  // 1. LAYAR GEMBOK (Belum punya akses)
+  if (authStatus === 'UNAUTHORIZED' || authStatus === 'PENDING') {
+    return <LockScreen deviceId={deviceId} status={authStatus} onRefresh={() => window.location.reload()} />;
+  }
+
+  // 2. LAYAR UTAMA (APPROVED atau ADMIN)
+  return (
+    <>
+      <Home 
+        isAdmin={authStatus === 'ADMIN'} 
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenAdmin={() => setAdminOpen(true)}
+      />
+      
+      <SettingsModal 
+        open={settingsOpen} 
+        onClose={() => setSettingsOpen(false)}
+      />
+
+      {authStatus === 'ADMIN' && (
+        <AdminModal 
+          open={adminOpen} 
+          onClose={() => setAdminOpen(false)} 
+        />
+      )}
+    </>
+  );
+}
+
+/* ══════════════ Lock Screen ══════════════ */
+function LockScreen({ deviceId, status, onRefresh }: { deviceId: string, status: string, onRefresh: () => void }) {
+  const [loading, setLoading] = useState(false);
+
+  const requestAccess = async () => {
+    setLoading(true);
+    await fetch('/api/auth/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId })
+    });
+    setLoading(false);
+    onRefresh();
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-app p-4 text-main">
+      <div className="w-full max-w-md rounded-2xl border border-line bg-card p-8 text-center shadow-2xl">
+        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-accent/15 text-accent">
+          <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+        </div>
+        <h1 className="text-xl font-bold">Akses Terkunci</h1>
+        <p className="mt-2 text-sm text-muted">
+          Website ini bersifat privat. Kamu harus meminta izin akses dari Admin <strong className="text-main">Hans</strong> terlebih dahulu.
+        </p>
+
+        {status === 'PENDING' ? (
+          <div className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-500">
+            ⏳ Menunggu persetujuan dari Hans. <br/><span className="text-xs opacity-70 mt-1 block">Halaman ini akan otomatis terbuka jika sudah di-approve.</span>
+          </div>
+        ) : (
+          <button 
+            onClick={requestAccess}
+            disabled={loading}
+            className="mt-6 w-full rounded-xl bg-accent py-3 text-sm font-bold text-accent-text transition hover:bg-accent-hover disabled:opacity-50"
+          >
+            {loading ? 'Mengirim permintaan...' : 'Minta Akses Sekarang'}
+          </button>
+        )}
+
+        <div className="mt-6 text-[10px] text-subtle font-mono">
+          Device ID: {deviceId}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════ Admin Modal ══════════════ */
+function AdminModal({ open, onClose }: { open: boolean, onClose: () => void }) {
+  const [requests, setRequests] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchReqs = useCallback(async () => {
+    setLoading(true);
+    const res = await fetch('/api/admin/requests');
+    if (res.ok) setRequests(await res.json());
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { if (open) fetchReqs(); }, [open, fetchReqs]);
+
+  const updateStatus = async (id: string, status: string) => {
+    await fetch('/api/admin/requests', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status })
+    });
+    fetchReqs();
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-line bg-card shadow-2xl">
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
+          <h2 className="text-lg font-bold">Admin Panel - Hans</h2>
+          <button onClick={onClose} className="text-muted hover:text-main">Tutup</button>
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto p-5">
+          {requests.length === 0 ? (
+            <div className="text-center text-muted py-8">Tidak ada permintaan akses.</div>
+          ) : (
+            <div className="space-y-3">
+              {requests.map(r => (
+                <div key={r.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl border border-line bg-app p-4">
+                  <div>
+                    <div className="font-semibold text-sm flex items-center gap-2">
+                      IP: {r.ipAddress}
+                      {r.status === 'APPROVED' && <span className="text-[10px] bg-emerald-500/20 text-emerald-500 px-2 py-0.5 rounded">Approved</span>}
+                      {r.status === 'PENDING' && <span className="text-[10px] bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded">Pending</span>}
+                    </div>
+                    <div className="text-[11px] text-subtle font-mono mt-1">ID: {r.deviceId}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    {r.status !== 'APPROVED' && (
+                      <button onClick={() => updateStatus(r.id, 'APPROVED')} className="rounded bg-emerald-500/20 px-3 py-1.5 text-xs font-semibold text-emerald-500 hover:bg-emerald-500/30">Approve</button>
+                    )}
+                    {r.status !== 'REJECTED' && (
+                      <button onClick={() => updateStatus(r.id, 'REJECTED')} className="rounded bg-red-500/20 px-3 py-1.5 text-xs font-semibold text-red-500 hover:bg-red-500/30">Reject</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════ Main Home (Player Monitor) ══════════════ */
+function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOpenSettings: () => void, onOpenAdmin: () => void }) {
   const [data, setData]         = useState<ApiData | null>(null);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
@@ -129,18 +313,14 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [aiOpen, setAiOpen]     = useState(false);
   
-  // Settings State
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light' | 'glass'>('dark');
   const [refreshMs, setRefreshMs] = useState(60000);
   const [compactMode, setCompactMode] = useState(false);
-
-  // Restart Timer State
   const [countdown, setCountdown] = useState<{ diffMs: number, target: Date } | null>(null);
 
   // Load Settings from LocalStorage
   useEffect(() => {
-    const savedTheme = localStorage.getItem('ime-theme') as 'dark' | 'light' | 'glass';
+    const savedTheme = localStorage.getItem('ime-theme') as any;
     if (savedTheme) setTheme(savedTheme);
     const savedRefresh = localStorage.getItem('ime-refresh');
     if (savedRefresh) setRefreshMs(Number(savedRefresh));
@@ -148,40 +328,27 @@ export default function Home() {
     if (savedCompact) setCompactMode(savedCompact === 'true');
   }, []);
 
-  // Apply Theme
   useEffect(() => {
     localStorage.setItem('ime-theme', theme);
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
-
   useEffect(() => { localStorage.setItem('ime-refresh', String(refreshMs)); }, [refreshMs]);
   useEffect(() => { localStorage.setItem('ime-compact', String(compactMode)); }, [compactMode]);
 
-  // Restart Timer Logic (06:00 & 18:00 WIB / UTC+7)
   useEffect(() => {
     const updateTimer = () => {
       const now = new Date();
       const wibOffset = 7 * 60 * 60 * 1000;
       const nowWib = new Date(now.getTime() + wibOffset);
       const h = nowWib.getUTCHours();
-
       let targetWib = new Date(nowWib);
       targetWib.setUTCHours(0, 0, 0, 0);
-
-      if (h < 6) {
-        targetWib.setUTCHours(6, 0, 0, 0);
-      } else if (h < 18) {
-        targetWib.setUTCHours(18, 0, 0, 0);
-      } else {
-        targetWib.setUTCDate(targetWib.getUTCDate() + 1);
-        targetWib.setUTCHours(6, 0, 0, 0);
-      }
-
+      if (h < 6) targetWib.setUTCHours(6, 0, 0, 0);
+      else if (h < 18) targetWib.setUTCHours(18, 0, 0, 0);
+      else { targetWib.setUTCDate(targetWib.getUTCDate() + 1); targetWib.setUTCHours(6, 0, 0, 0); }
       const diffMs = targetWib.getTime() - nowWib.getTime();
-      const targetReal = new Date(targetWib.getTime() - wibOffset);
-      setCountdown({ diffMs, target: targetReal });
+      setCountdown({ diffMs, target: new Date(targetWib.getTime() - wibOffset) });
     };
-
     updateTimer();
     const id = setInterval(updateTimer, 1000);
     return () => clearInterval(id);
@@ -204,18 +371,13 @@ export default function Home() {
     }
   }, []);
 
-  // Fetch loop based on refreshMs
   useEffect(() => {
     load();
     const id = setInterval(load, refreshMs);
     return () => clearInterval(id);
   }, [load, refreshMs]);
 
-  const enriched = useMemo(
-    () => (data?.players ?? []).map(p => ({ ...p, faction: detectFaction(p.name) })),
-    [data]
-  );
-
+  const enriched = useMemo(() => (data?.players ?? []).map(p => ({ ...p, faction: detectFaction(p.name) })), [data]);
   const counts = useMemo(() => {
     const c: Record<string, number> = { SEMUA: enriched.length };
     for (const f of [...FACTIONS, WARGA]) c[f.id] = 0;
@@ -227,11 +389,7 @@ export default function Home() {
     let list = enriched;
     if (activeCat !== 'SEMUA') list = list.filter(p => p.faction === activeCat);
     const q = search.trim().toLowerCase();
-    if (q) {
-      list = list.filter(
-        p => p.name.toLowerCase().includes(q) || String(p.id).includes(q)
-      );
-    }
+    if (q) list = list.filter(p => p.name.toLowerCase().includes(q) || String(p.id).includes(q));
     return list;
   }, [enriched, activeCat, search]);
 
@@ -255,7 +413,6 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-app text-main">
-      {/* ── Floating pill nav ── */}
       <div className="fixed top-3 left-1/2 z-40 w-full max-w-[100vw] -translate-x-1/2 px-3">
         <div className="relative mx-auto max-w-fit">
           <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-8 bg-gradient-to-r from-app to-transparent rounded-l-full" />
@@ -267,16 +424,12 @@ export default function Home() {
                   key={cat.id}
                   onClick={() => setActiveCat(cat.id)}
                   className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
-                    active
-                      ? 'bg-accent text-accent-text shadow-md'
-                      : 'text-muted hover:bg-hover hover:text-main'
+                    active ? 'bg-accent text-accent-text shadow-md' : 'text-muted hover:bg-hover hover:text-main'
                   }`}
                 >
                   <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-accent-text' : cat.dot}`} />
                   <span>{cat.short}</span>
-                  <span className={`text-[10px] ${active ? 'text-accent-text/70' : 'text-subtle'}`}>
-                    {counts[cat.id] ?? 0}
-                  </span>
+                  <span className={`text-[10px] ${active ? 'text-accent-text/70' : 'text-subtle'}`}>{counts[cat.id] ?? 0}</span>
                 </button>
               );
             })}
@@ -288,15 +441,9 @@ export default function Home() {
       <div className="mx-auto max-w-5xl px-4 pb-16 pt-20 sm:px-6">
         <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-subtle">
-              IME Roleplay
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-              Player Monitor
-            </h1>
-            <p className="mt-1 text-sm text-muted">
-              Pantau siapa saja yang sedang bermain sekarang
-            </p>
+            <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-subtle">IME Roleplay</div>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Player Monitor</h1>
+            <p className="mt-1 text-sm text-muted">Pantau siapa saja yang sedang bermain sekarang</p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -307,70 +454,44 @@ export default function Home() {
               </div>
             )}
 
-            {/* Settings Gear Icon */}
-            <button
-              onClick={() => setSettingsOpen(true)}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-card text-muted transition-all duration-300 hover:border-accent/50 hover:text-main hover:rotate-90"
-              title="Pengaturan"
-            >
+            {isAdmin && (
+              <button onClick={onOpenAdmin} className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-500 transition hover:bg-emerald-500/20" title="Admin Panel">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+              </button>
+            )}
+
+            <button onClick={onOpenSettings} className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-card text-muted transition-all duration-300 hover:border-accent/50 hover:text-main hover:rotate-90" title="Pengaturan">
               <GearIcon className="h-4 w-4" />
             </button>
 
-            <StatusBadge error={error} loading={loading} refreshing={refreshing} />
-            
-            <button
-              onClick={() => setAiOpen(true)}
-              className="group flex items-center gap-2 rounded-full border border-line bg-card px-4 py-1.5 text-xs font-medium text-accent transition hover:border-accent/50 hover:bg-hover"
-            >
+            <button onClick={() => setAiOpen(true)} className="group flex items-center gap-2 rounded-full border border-line bg-card px-4 py-1.5 text-xs font-medium text-accent transition hover:border-accent/50 hover:bg-hover">
               <SparkIcon className="h-3.5 w-3.5" />
               Tanya AI
             </button>
           </div>
         </header>
 
-        {/* ⚠️ Restart Warning Banner */}
         {isWarning && (
           <div className="mb-6 flex items-start sm:items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500 animate-pulse">
-            <svg className="h-5 w-5 shrink-0 mt-0.5 sm:mt-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            <div>
-              <span className="font-bold tracking-wide">PERINGATAN BADAI:</span> Server akan direstart dalam <span className="font-mono font-bold">{formatTime(countdown.diffMs)}</span>. Segera cari tempat aman dan simpan progress roleplay kamu!
-            </div>
+            <svg className="h-5 w-5 shrink-0 mt-0.5 sm:mt-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            <div><span className="font-bold tracking-wide">PERINGATAN BADAI:</span> Server akan direstart dalam <span className="font-mono font-bold">{formatTime(countdown.diffMs)}</span>.</div>
           </div>
         )}
 
         <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Stat label="Online"       value={data ? fmt(data.online) : '—'} accent="text-emerald-500" />
-          <Stat label="Max Slots"    value={data ? fmt(data.max)    : '—'} accent="text-blue-500" />
-          <Stat label="Gate"         value={data?.gate ?? '—'}             accent="text-accent" small />
-          <Stat label="Terakhir"     value={lastFetch ? lastFetch.toLocaleTimeString('id-ID') : '—'} accent="text-muted" small />
+          <Stat label="Online" value={data ? fmt(data.online) : '—'} accent="text-emerald-500" />
+          <Stat label="Max Slots" value={data ? fmt(data.max) : '—'} accent="text-blue-500" />
+          <Stat label="Gate" value={data?.gate ?? '—'} accent="text-accent" small />
+          <Stat label="Terakhir" value={lastFetch ? lastFetch.toLocaleTimeString('id-ID') : '—'} accent="text-muted" small />
         </section>
-
-        {error && (
-          <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
-            ⚠ {error}
-          </div>
-        )}
 
         <div className="mb-4 flex flex-wrap gap-3">
           <div className="relative min-w-[220px] flex-1">
             <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
-            <input
-              type="search"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Cari nama atau kantong…"
-              className="w-full rounded-lg border border-line bg-card py-2.5 pl-10 pr-4 text-sm text-main placeholder-subtle outline-none transition focus:border-accent/50 focus:ring-2 focus:ring-accent/15"
-            />
+            <input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari nama atau kantong…" className="w-full rounded-lg border border-line bg-card py-2.5 pl-10 pr-4 text-sm text-main placeholder-subtle outline-none transition focus:border-accent/50 focus:ring-2 focus:ring-accent/15" />
           </div>
-          <button
-            onClick={load}
-            disabled={refreshing}
-            className="inline-flex items-center gap-2 rounded-lg border border-line bg-card px-4 py-2.5 text-sm font-medium text-main transition hover:border-accent/40 disabled:opacity-40"
-          >
-            <RefreshIcon className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            Refresh
+          <button onClick={load} disabled={refreshing} className="inline-flex items-center gap-2 rounded-lg border border-line bg-card px-4 py-2.5 text-sm font-medium text-main transition hover:border-accent/40 disabled:opacity-40">
+            <RefreshIcon className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
           </button>
         </div>
 
@@ -388,31 +509,19 @@ export default function Home() {
                 {loading && !data ? (
                   <tr><td colSpan={3} className="px-4 py-16 text-center text-subtle">Memuat data…</td></tr>
                 ) : slice.length === 0 ? (
-                  <tr><td colSpan={3} className="px-4 py-16 text-center text-subtle">
-                    {filtered.length ? 'Tidak ada hasil.' : 'Tidak ada player di kategori ini.'}
-                  </td></tr>
+                  <tr><td colSpan={3} className="px-4 py-16 text-center text-subtle">{filtered.length ? 'Tidak ada hasil.' : 'Tidak ada player di kategori ini.'}</td></tr>
                 ) : slice.map(p => {
                   const fac = factionOf(p.faction);
                   return (
                     <tr key={p.id} className={`border-b border-line transition hover:bg-hover ${compactMode ? 'h-10' : 'h-14'}`}>
-                      <td className="px-4">
-                        <span className="inline-flex items-center rounded-md border border-line bg-app px-2 py-0.5 font-mono text-[11px] font-medium text-main">
-                          #{p.id}
-                        </span>
-                      </td>
+                      <td className="px-4"><span className="inline-flex items-center rounded-md border border-line bg-app px-2 py-0.5 font-mono text-[11px] font-medium text-main">#{p.id}</span></td>
                       <td className="px-4">
                         <div className="flex items-center gap-2">
-                          <span className={`inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold ${fac.badge}`}>
-                            {fac.short}
-                          </span>
+                          <span className={`inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold ${fac.badge}`}>{fac.short}</span>
                           <span className="truncate text-[13px] text-main">{p.name}</span>
                         </div>
                       </td>
-                      <td className="px-4 text-right">
-                        <span className={`inline-flex rounded border px-2 py-0.5 font-mono text-[11px] font-medium ${pingClass(p.ping)}`}>
-                          {p.ping}
-                        </span>
-                      </td>
+                      <td className="px-4 text-right"><span className={`inline-flex rounded border px-2 py-0.5 font-mono text-[11px] font-medium ${pingClass(p.ping)}`}>{p.ping}</span></td>
                     </tr>
                   );
                 })}
@@ -424,202 +533,81 @@ export default function Home() {
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted">
           <div>Auto-refresh {refreshMs/1000} detik · {filtered.length} player</div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setPage(Math.max(0, safePage - 1))}
-              disabled={safePage <= 0}
-              className="rounded-md border border-line bg-card px-3 py-1.5 font-medium text-main transition hover:border-accent/40 disabled:opacity-30"
-            >
-              ← Prev
-            </button>
-            <span className="min-w-[52px] text-center font-mono text-muted">
-              {safePage + 1}/{totalPages}
-            </span>
-            <button
-              onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))}
-              disabled={safePage >= totalPages - 1}
-              className="rounded-md border border-line bg-card px-3 py-1.5 font-medium text-main transition hover:border-accent/40 disabled:opacity-30"
-            >
-              Next →
-            </button>
+            <button onClick={() => setPage(Math.max(0, safePage - 1))} disabled={safePage <= 0} className="rounded-md border border-line bg-card px-3 py-1.5 font-medium text-main transition hover:border-accent/40 disabled:opacity-30">← Prev</button>
+            <span className="min-w-[52px] text-center font-mono text-muted">{safePage + 1}/{totalPages}</span>
+            <button onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))} disabled={safePage >= totalPages - 1} className="rounded-md border border-line bg-card px-3 py-1.5 font-medium text-main transition hover:border-accent/40 disabled:opacity-30">Next →</button>
           </div>
         </div>
       </div>
 
-      {/* Modal Settings */}
-      <SettingsModal 
-        open={settingsOpen} 
-        onClose={() => setSettingsOpen(false)}
-        theme={theme}
-        setTheme={setTheme}
-        refreshMs={refreshMs}
-        setRefreshMs={setRefreshMs}
-        compactMode={compactMode}
-        setCompactMode={setCompactMode}
-      />
-
-      <AIDrawer
-        open={aiOpen}
-        onClose={() => setAiOpen(false)}
-        data={data}
-        enriched={enriched}
-        counts={counts}
-        activeCat={activeCat}
-      />
+      <AIDrawer open={aiOpen} onClose={() => setAiOpen(false)} data={data} enriched={enriched} counts={counts} activeCat={activeCat} />
     </main>
   );
 }
 
-/* ══════════════ Sub-components ══════════════ */
-
-function Stat({ label, value, accent, small }: { label: string; value: string; accent: string; small?: boolean }) {
-  return (
-    <div className="rounded-xl border border-line bg-card p-4 shadow-sm">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">{label}</div>
-      <div className={`mt-1 truncate font-semibold ${accent} ${small ? 'text-base' : 'text-xl'}`}>{value}</div>
-    </div>
-  );
-}
-
-function StatusBadge({ error, loading, refreshing }: { error: string | null; loading: boolean; refreshing: boolean }) {
-  const state = error ? 'err' : loading ? 'wait' : 'ok';
-  const map = {
-    ok:   { dot: 'bg-emerald-500', text: 'text-emerald-500', label: 'Live' },
-    wait: { dot: 'bg-amber-500', text: 'text-amber-500', label: 'Memuat' },
-    err:  { dot: 'bg-red-500', text: 'text-red-500', label: 'Offline' }
-  } as const;
-  const s = map[state];
-  return (
-    <div className="flex items-center gap-2 rounded-full border border-line bg-card px-3 py-1.5 text-[11px]">
-      <span className={`h-1.5 w-1.5 rounded-full ${s.dot} ${refreshing ? 'animate-pulse' : ''}`} />
-      <span className={s.text}>{s.label}</span>
-    </div>
-  );
-}
-
 /* ══════════════ Settings Modal ══════════════ */
-function SettingsModal({ 
-  open, onClose, theme, setTheme, refreshMs, setRefreshMs, compactMode, setCompactMode 
-}: {
-  open: boolean;
-  onClose: () => void;
-  theme: string;
-  setTheme: (t: any) => void;
-  refreshMs: number;
-  setRefreshMs: (ms: number) => void;
-  compactMode: boolean;
-  setCompactMode: (c: boolean) => void;
-}) {
+function SettingsModal({ open, onClose }: { open: boolean, onClose: () => void }) {
+  const [theme, setTheme] = useState<'dark' | 'light' | 'glass'>('dark');
+  const [refreshMs, setRefreshMs] = useState(60000);
+  const [compactMode, setCompactMode] = useState(false);
+
+  useEffect(() => {
+    setTheme((localStorage.getItem('ime-theme') as any) || 'dark');
+    setRefreshMs(Number(localStorage.getItem('ime-refresh')) || 60000);
+    setCompactMode(localStorage.getItem('ime-compact') === 'true');
+  }, [open]);
+
+  const save = () => {
+    localStorage.setItem('ime-theme', theme);
+    localStorage.setItem('ime-refresh', String(refreshMs));
+    localStorage.setItem('ime-compact', String(compactMode));
+    document.documentElement.setAttribute('data-theme', theme);
+    onClose();
+    window.location.reload(); // Force reload to apply new interval
+  };
+
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6">
-      <div 
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" 
-        onClick={onClose} 
-      />
-      
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={onClose} />
       <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-line bg-card shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15">
-              <GearIcon className="h-4 w-4 text-accent" />
-            </span>
-            <div>
-              <div className="text-sm font-semibold text-main">Pengaturan</div>
-              <div className="text-[11px] text-subtle">Sesuaikan tampilan & preferensi</div>
-            </div>
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15"><GearIcon className="h-4 w-4 text-accent" /></span>
+            <div><div className="text-sm font-semibold text-main">Pengaturan</div><div className="text-[11px] text-subtle">Sesuaikan tampilan & preferensi</div></div>
           </div>
-          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main">
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
         </div>
-
-        {/* Body */}
         <div className="space-y-6 px-5 py-5">
-          
-          {/* Tema */}
           <div>
             <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Tema Tampilan</div>
             <div className="grid grid-cols-3 gap-3">
-              {[
-                { id: 'dark', label: 'Dark', bg: 'bg-[#0c0a08]', border: 'border-[#2a2520]', text: 'text-[#ebe3d5]' },
-                { id: 'light', label: 'Light', bg: 'bg-[#f8fafc]', border: 'border-[#e2e8f0]', text: 'text-[#0f172a]' },
-                { id: 'glass', label: 'Glass', bg: 'bg-[#09090b]', border: 'border-white/10', text: 'text-[#f4f4f5]' }
-              ].map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setTheme(t.id)}
-                  className={`group relative flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${
-                    theme === t.id 
-                      ? 'border-accent ring-2 ring-accent/20' 
-                      : 'border-line hover:border-accent/40'
-                  }`}
-                >
-                  <div className={`h-10 w-full rounded-md border ${t.bg} ${t.border} flex items-center justify-center`}>
-                    <div className={`h-1.5 w-6 rounded-full ${theme === t.id ? 'bg-accent' : 'bg-line'}`} />
-                  </div>
-                  <span className={`text-xs font-medium ${theme === t.id ? 'text-accent' : 'text-muted group-hover:text-main'}`}>
-                    {t.label}
-                  </span>
+              {[{ id: 'dark', label: 'Dark', bg: 'bg-[#0c0a08]', border: 'border-[#2a2520]' }, { id: 'light', label: 'Light', bg: 'bg-[#f8fafc]', border: 'border-[#e2e8f0]' }, { id: 'glass', label: 'Glass', bg: 'bg-[#09090b]', border: 'border-white/10' }].map(t => (
+                <button key={t.id} onClick={() => setTheme(t.id as any)} className={`group relative flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${theme === t.id ? 'border-accent ring-2 ring-accent/20' : 'border-line hover:border-accent/40'}`}>
+                  <div className={`h-10 w-full rounded-md border ${t.bg} ${t.border} flex items-center justify-center`}><div className={`h-1.5 w-6 rounded-full ${theme === t.id ? 'bg-accent' : 'bg-line'}`} /></div>
+                  <span className={`text-xs font-medium ${theme === t.id ? 'text-accent' : 'text-muted group-hover:text-main'}`}>{t.label}</span>
                 </button>
               ))}
             </div>
           </div>
-
           <hr className="border-line" />
-
-          {/* Interval Refresh */}
           <div>
-            <div className="mb-3 flex items-center justify-between">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-subtle">Interval Refresh</div>
-              <div className="text-[11px] text-muted">{refreshMs / 1000} detik</div>
-            </div>
+            <div className="mb-3 flex items-center justify-between"><div className="text-[11px] font-semibold uppercase tracking-wider text-subtle">Interval Refresh</div><div className="text-[11px] text-muted">{refreshMs / 1000} detik</div></div>
             <div className="flex rounded-lg border border-line bg-app p-1">
               {[30, 60, 120].map(s => (
-                <button
-                  key={s}
-                  onClick={() => setRefreshMs(s * 1000)}
-                  className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${
-                    refreshMs === s * 1000 
-                      ? 'bg-card text-main shadow-sm' 
-                      : 'text-muted hover:text-main'
-                  }`}
-                >
-                  {s} Detik
-                </button>
+                <button key={s} onClick={() => setRefreshMs(s * 1000)} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${refreshMs === s * 1000 ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>{s} Detik</button>
               ))}
             </div>
           </div>
-
           <hr className="border-line" />
-
-          {/* Compact Mode */}
           <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium text-main">Mode Ringkas</div>
-              <div className="text-[11px] text-muted mt-0.5">Kurangi jarak antar baris tabel agar muat lebih banyak.</div>
-            </div>
-            <button 
-              onClick={() => setCompactMode(!compactMode)}
-              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${compactMode ? 'bg-accent' : 'bg-hover'}`}
-            >
-              <span className={`absolute top-1 left-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${compactMode ? 'translate-x-5' : 'translate-x-0'}`} />
-            </button>
+            <div><div className="text-sm font-medium text-main">Mode Ringkas</div><div className="text-[11px] text-muted mt-0.5">Kurangi jarak antar baris tabel agar muat lebih banyak.</div></div>
+            <button onClick={() => setCompactMode(!compactMode)} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${compactMode ? 'bg-accent' : 'bg-hover'}`}><span className={`absolute top-1 left-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${compactMode ? 'translate-x-5' : 'translate-x-0'}`} /></button>
           </div>
-
         </div>
-        
-        {/* Footer */}
         <div className="border-t border-line bg-app px-5 py-3 text-right">
-          <button 
-            onClick={onClose}
-            className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-text transition hover:bg-accent-hover"
-          >
-            Simpan & Tutup
-          </button>
+          <button onClick={save} className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-text transition hover:bg-accent-hover">Simpan & Tutup</button>
         </div>
       </div>
     </div>
@@ -627,181 +615,56 @@ function SettingsModal({
 }
 
 /* ══════════════ AI Drawer ══════════════ */
-function AIDrawer({
-  open, onClose, data, enriched, counts, activeCat
-}: {
-  open: boolean;
-  onClose: () => void;
-  data: ApiData | null;
-  enriched: (Player & { faction: string })[];
-  counts: Record<string, number>;
-  activeCat: string;
-}) {
+function AIDrawer({ open, onClose, data, enriched, counts, activeCat }: any) {
   const [msgs, setMsgs] = useState<AiMsg[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [msgs, sending]);
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [msgs, sending]);
 
   const buildContext = useCallback(() => {
     if (!data) return null;
-    const factionSummary: Record<string, { label: string; count: number }> = {};
+    const factionSummary: any = {};
     for (const [id, count] of Object.entries(counts)) {
-      if (id === 'SEMUA') continue;
-      if (!count) continue;
-      const fac = id === 'WARGA' ? WARGA : factionOf(id);
-      factionSummary[id] = { label: fac.label, count };
+      if (id === 'SEMUA' || !count) continue;
+      factionSummary[id] = { label: factionOf(id).label, count };
     }
-    return {
-      totalOnline: data.online,
-      maxSlots: data.max,
-      gate: data.gate,
-      updatedAt: data.updatedAt,
-      currentFilter: activeCat,
-      factions: factionSummary,
-      players: enriched.slice(0, 150).map(p => ({
-        kantong: p.id,
-        nama: p.name,
-        faction: factionOf(p.faction).label,
-        ping: p.ping
-      }))
-    };
+    return { totalOnline: data.online, maxSlots: data.max, gate: data.gate, updatedAt: data.updatedAt, currentFilter: activeCat, factions: factionSummary, players: enriched.slice(0, 150).map((p: any) => ({ kantong: p.id, nama: p.name, faction: factionOf(p.faction).label, ping: p.ping })) };
   }, [data, counts, activeCat, enriched]);
 
   async function send(text: string) {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     const next: AiMsg[] = [...msgs, { role: 'user', content: trimmed }];
-    setMsgs(next);
-    setInput('');
-    setSending(true);
+    setMsgs(next); setInput(''); setSending(true);
     try {
-      const res = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: next, context: buildContext() })
-      });
+      const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: next, context: buildContext() }) });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Gagal');
       setMsgs([...next, { role: 'assistant', content: json.text }]);
-    } catch (e: any) {
-      setMsgs([...next, { role: 'assistant', content: `⚠ ${e.message}` }]);
-    } finally {
-      setSending(false);
-    }
+    } catch (e: any) { setMsgs([...next, { role: 'assistant', content: `⚠ ${e.message}` }]); } finally { setSending(false); }
   }
 
-  const SUGGESTIONS = [
-    'Ringkas siapa saja yang online sekarang',
-    'Faction apa yang paling banyak online?',
-    'Siapa saja polisi (LSPD/LSSD) yang online?',
-    'Ada berapa CC dan siapa nama mereka?',
-    'Player mana yang pingnya paling buruk?'
-  ];
+  const SUGGESTIONS = ['Ringkas siapa saja yang online sekarang', 'Faction apa yang paling banyak online?', 'Siapa saja polisi (LSPD/LSSD) yang online?', 'Ada berapa CC dan siapa nama mereka?', 'Player mana yang pingnya paling buruk?'];
 
   return (
     <div className={`fixed inset-0 z-50 ${open ? '' : 'pointer-events-none'}`}>
-      <div
-        onClick={onClose}
-        className={`absolute inset-0 bg-black/50 transition-opacity ${open ? 'opacity-100' : 'opacity-0'}`}
-      />
-      <aside
-        className={`absolute right-0 top-0 flex h-full w-full flex-col border-l border-line bg-app transition-transform duration-300 sm:w-[440px] ${
-          open ? 'translate-x-0' : 'translate-x-full'
-        }`}
-      >
+      <div onClick={onClose} className={`absolute inset-0 bg-black/50 transition-opacity ${open ? 'opacity-100' : 'opacity-0'}`} />
+      <aside className={`absolute right-0 top-0 flex h-full w-full flex-col border-l border-line bg-app transition-transform duration-300 sm:w-[440px] ${open ? 'translate-x-0' : 'translate-x-full'}`}>
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15">
-              <SparkIcon className="h-4 w-4 text-accent" />
-            </span>
-            <div>
-              <div className="text-sm font-semibold text-main">Analisis AI</div>
-              <div className="text-[11px] text-subtle">Punya konteks data player realtime</div>
-            </div>
-          </div>
-          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main">
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15"><SparkIcon className="h-4 w-4 text-accent" /></span><div><div className="text-sm font-semibold text-main">Analisis AI</div><div className="text-[11px] text-subtle">Punya konteks data player realtime</div></div></div>
+          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
         </div>
-
         <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-          {msgs.length === 0 && (
-            <div className="space-y-3">
-              <p className="text-sm text-muted">
-                Tanya apa saja soal server yang lagi online. Contoh:
-              </p>
-              <div className="flex flex-col gap-2">
-                {SUGGESTIONS.map(s => (
-                  <button
-                    key={s}
-                    onClick={() => send(s)}
-                    className="rounded-lg border border-line bg-card px-3 py-2 text-left text-[13px] text-muted transition hover:border-accent/40 hover:bg-hover hover:text-main"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {msgs.map((m, i) => (
-            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div
-                className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
-                  m.role === 'user'
-                    ? 'bg-accent text-accent-text whitespace-pre-wrap'
-                    : 'border border-line bg-card text-main'
-                }`}
-              >
-                {m.role === 'user' ? m.content : renderMarkdown(m.content)}
-              </div>
-            </div>
-          ))}
-
-          {sending && (
-            <div className="flex justify-start">
-              <div className="flex gap-1 rounded-xl border border-line bg-card px-3.5 py-3">
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '0ms' }} />
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '150ms' }} />
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '300ms' }} />
-              </div>
-            </div>
-          )}
+          {msgs.length === 0 && (<div className="space-y-3"><p className="text-sm text-muted">Tanya apa saja soal server yang lagi online. Contoh:</p><div className="flex flex-col gap-2">{SUGGESTIONS.map(s => (<button key={s} onClick={() => send(s)} className="rounded-lg border border-line bg-card px-3 py-2 text-left text-[13px] text-muted transition hover:border-accent/40 hover:bg-hover hover:text-main">{s}</button>))}</div></div>)}
+          {msgs.map((m, i) => (<div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed ${m.role === 'user' ? 'bg-accent text-accent-text whitespace-pre-wrap' : 'border border-line bg-card text-main'}`}>{m.role === 'user' ? m.content : renderMarkdown(m.content)}</div></div>))}
+          {sending && (<div className="flex justify-start"><div className="flex gap-1 rounded-xl border border-line bg-card px-3.5 py-3"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '0ms' }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '150ms' }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '300ms' }} /></div></div>)}
         </div>
-
         <div className="border-t border-line p-3">
-          <form
-            onSubmit={e => { e.preventDefault(); send(input); }}
-            className="flex gap-2"
-          >
-            <textarea
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  send(input);
-                }
-              }}
-              placeholder="Tanya soal player, faction, ping…"
-              rows={1}
-              className="flex-1 resize-none rounded-lg border border-line bg-card px-3 py-2 text-[13px] text-main placeholder-subtle outline-none transition focus:border-accent/50 focus:ring-2 focus:ring-accent/15"
-            />
-            <button
-              type="submit"
-              disabled={sending || !input.trim()}
-              className="flex shrink-0 items-center justify-center rounded-lg bg-accent px-3 text-accent-text transition hover:bg-accent-hover disabled:opacity-30"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-              </svg>
-            </button>
+          <form onSubmit={e => { e.preventDefault(); send(input); }} className="flex gap-2">
+            <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }} placeholder="Tanya soal player, faction, ping…" rows={1} className="flex-1 resize-none rounded-lg border border-line bg-card px-3 py-2 text-[13px] text-main placeholder-subtle outline-none transition focus:border-accent/50 focus:ring-2 focus:ring-accent/15" />
+            <button type="submit" disabled={sending || !input.trim()} className="flex shrink-0 items-center justify-center rounded-lg bg-accent px-3 text-accent-text transition hover:bg-accent-hover disabled:opacity-30"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg></button>
           </form>
         </div>
       </aside>
@@ -809,33 +672,11 @@ function AIDrawer({
   );
 }
 
-/* ─── Icons ─── */
-function SearchIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-    </svg>
-  );
+/* ══════════════ Icons & UI Bits ══════════════ */
+function Stat({ label, value, accent, small }: any) {
+  return (<div className="rounded-xl border border-line bg-card p-4 shadow-sm"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">{label}</div><div className={`mt-1 truncate font-semibold ${accent} ${small ? 'text-base' : 'text-xl'}`}>{value}</div></div>);
 }
-function RefreshIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-    </svg>
-  );
-}
-function SparkIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z" />
-    </svg>
-  );
-}
-function GearIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
-  );
-}
+function SearchIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>); }
+function RefreshIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>); }
+function SparkIcon({ className }: any) { return (<svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z" /></svg>); }
+function GearIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>); }
