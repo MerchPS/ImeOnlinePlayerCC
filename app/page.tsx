@@ -20,35 +20,48 @@ type FactionDef = {
   id: string;
   short: string;
   label: string;
-  badge: string;   // tailwind classes untuk badge
+  badge: string;   // tailwind classes
   dot: string;     // warna dot di nav
   match: (p: string) => boolean;
 };
 
 const FACTIONS: FactionDef[] = [
-  { id: 'CC',    short: 'CC',    label: 'Crimson Creed',             badge: 'bg-[#3a1f1a] text-[#e09b7a] border-[#5a2f25]', dot: 'bg-[#c97a5c]', match: p => p.includes('CC') },
-  { id: 'LSPD',  short: 'LSPD',  label: 'Polisi Kota',                badge: 'bg-[#1a2535] text-[#82aed8] border-[#253a55]', dot: 'bg-[#6a9dd8]', match: p => p.includes('LSPD') },
-  { id: '4B',    short: '4B',    label: '4Bloods',                    badge: 'bg-[#2f1a1a] text-[#d47878] border-[#4a2525]', dot: 'bg-[#c95c5c]', match: p => p.includes('4B') },
-  { id: 'DOC',   short: 'DOC',   label: 'Department Of Correction',   badge: 'bg-[#252525] text-[#b0b0b0] border-[#3a3a3a]', dot: 'bg-[#a0a0a0]', match: p => p.includes('DOC') },
-  { id: 'LSSD',  short: 'LSSD',  label: 'Serif',                      badge: 'bg-[#2f2a1a] text-[#dcc878] border-[#4a4525]', dot: 'bg-[#c9b05c]', match: p => p.includes('LSSD') },
-  { id: 'MEDIC', short: 'MED',   label: 'Dokter Kota',                badge: 'bg-[#25302a] text-[#9dd88c] border-[#3a4a35]', dot: 'bg-[#8cc97a]', match: p => p.includes('MEDIC') },
-  { id: 'RH',    short: 'RH',    label: 'Roxwood Hospital',           badge: 'bg-[#1a2f2a] text-[#7ad8b0] border-[#254a3f]', dot: 'bg-[#6ac9a0]', match: p => p.includes('RH') },
-  { id: 'ICR',   short: 'ICR',   label: 'Mekanik IME',                badge: 'bg-[#3a2f1a] text-[#dcc878] border-[#5a4a25]', dot: 'bg-[#c9a95c]', match: p => p.includes('ICR') },
-  { id: 'DOJ',   short: 'DOJ',   label: 'Department Of Justice',      badge: 'bg-[#2a1f35] text-[#b48fd8] border-[#3f2f55]', dot: 'bg-[#a07ac9]', match: p => p.includes('DOJ') },
-  { id: 'JRZ',   short: 'JRZ',   label: 'Jeruzalem',                  badge: 'bg-[#3a351a] text-[#dcd478] border-[#5a5525]', dot: 'bg-[#c9c05c]', match: p => p.includes('JRZ') },
-  { id: 'HT',    short: 'HT',    label: 'HighTable',                  badge: 'bg-[#2a2515] text-[#e0b88a] border-[#453f25]', dot: 'bg-[#d4a574]', match: p => p.includes('HT') },
-  { id: 'IME',   short: 'IME',   label: 'Helper',                     badge: 'bg-[#1a2f35] text-[#7ad8e0] border-[#254a55]', dot: 'bg-[#6ac9d8]', match: p => p.includes('#IME') }
+  { id: 'CC',      short: 'CC',       label: 'Crimson Creed',             badge: 'bg-[#3a1f1a] text-[#e09b7a] border-[#5a2f25]', dot: 'bg-[#c97a5c]', match: p => p.includes('CC') },
+  { id: 'LSPD',    short: 'LSPD',     label: 'Polisi Kota',                badge: 'bg-[#1a2535] text-[#82aed8] border-[#253a55]', dot: 'bg-[#6a9dd8]', match: p => p.includes('LSPD') },
+  { id: '4B',      short: '4B',       label: '4Bloods',                    badge: 'bg-[#2f1a1a] text-[#d47878] border-[#4a2525]', dot: 'bg-[#c95c5c]', match: p => p.includes('4B') },
+  { id: 'DOC',     short: 'DOC',      label: 'Department Of Correction',   badge: 'bg-[#252525] text-[#b0b0b0] border-[#3a3a3a]', dot: 'bg-[#a0a0a0]', match: p => p.includes('DOC') },
+  { id: 'LSSD',    short: 'LSSD',     label: 'Serif',                      badge: 'bg-[#2f2a1a] text-[#dcc878] border-[#4a4525]', dot: 'bg-[#c9b05c]', match: p => p.includes('LSSD') },
+  { id: 'MEDIC',   short: 'MED',      label: 'Dokter Kota',                badge: 'bg-[#25302a] text-[#9dd88c] border-[#3a4a35]', dot: 'bg-[#8cc97a]', match: p => p.includes('MEDIC') },
+  { id: 'RH',      short: 'RH',       label: 'Roxwood Hospital',           badge: 'bg-[#1a2f2a] text-[#7ad8b0] border-[#254a3f]', dot: 'bg-[#6ac9a0]', match: p => p.includes('RH') },
+  { id: 'ICR',     short: 'ICR',      label: 'Mekanik IME',                badge: 'bg-[#3a2f1a] text-[#dcc878] border-[#5a4a25]', dot: 'bg-[#c9a95c]', match: p => p.includes('ICR') },
+  { id: 'DOJ',     short: 'DOJ',      label: 'Department Of Justice',      badge: 'bg-[#2a1f35] text-[#b48fd8] border-[#3f2f55]', dot: 'bg-[#a07ac9]', match: p => p.includes('DOJ') },
+  { id: 'JRZ',     short: 'JRZ',      label: 'Jeruzalem',                  badge: 'bg-[#3a351a] text-[#dcd478] border-[#5a5525]', dot: 'bg-[#c9c05c]', match: p => p.includes('JRZ') },
+  { id: 'HT',      short: 'HT',       label: 'HighTable',                  badge: 'bg-[#2a2515] text-[#e0b88a] border-[#453f25]', dot: 'bg-[#d4a574]', match: p => p.includes('HT') },
+  { id: 'IME',     short: 'IME',      label: 'Helper',                     badge: 'bg-[#1a2f35] text-[#7ad8e0] border-[#254a55]', dot: 'bg-[#6ac9d8]', match: p => p.includes('#IME') },
+  { id: 'BURGENK', short: 'Burgenk',  label: 'Burgenk',                    badge: 'bg-[#2a1a25] text-[#d882b0] border-[#4a2540]', dot: 'bg-[#c95c90]', match: p => p.includes('BURGENK') },
+  { id: 'DTF',     short: 'DTF',      label: 'DTF',                        badge: 'bg-[#1a2525] text-[#82d8d8] border-[#254a4a]', dot: 'bg-[#6ac9c9]', match: p => p.includes('DTF') },
+  { id: 'ALLSTAR', short: 'Allstars', label: 'Allstars',                   badge: 'bg-[#25251a] text-[#d8d882] border-[#4a4a25]', dot: 'bg-[#c9c95c]', match: p => p.includes('ALLSTAR') },
+  { id: 'NSN',     short: 'NSN',      label: 'NSN',                        badge: 'bg-[#351a2a] text-[#d882b0] border-[#552540]', dot: 'bg-[#c95c90]', match: p => p.includes('NSN') },
+  { id: 'WT',      short: 'WT',       label: 'WT',                         badge: 'bg-[#1a3525] text-[#82d8a0] border-[#254a35]', dot: 'bg-[#6ac980]', match: p => p.startsWith('WT') },
+  { id: '24S',     short: '24S',      label: '24S',                        badge: 'bg-[#2a1a1a] text-[#d88282] border-[#4a2525]', dot: 'bg-[#c95c5c]', match: p => p.includes('24S') },
+  { id: 'OMC',     short: 'OMC',      label: 'OMC',                        badge: 'bg-[#1a2a35] text-[#82b0d8] border-[#254055]', dot: 'bg-[#5c90c9]', match: p => p.includes('OMC') },
+  { id: '5TAR',    short: '5TAR',     label: '5TAR',                       badge: 'bg-[#352a1a] text-[#d8b082] border-[#554025]', dot: 'bg-[#c9905c]', match: p => p.includes('5TAR') },
+  { id: 'MX',      short: 'MX',       label: 'MX',                         badge: 'bg-[#2a1a35] text-[#b082d8] border-[#402555]', dot: 'bg-[#905cc9]', match: p => p.startsWith('MX') },
+  { id: 'RCMC',    short: 'RCMC',     label: 'RCMC',                       badge: 'bg-[#35251a] text-[#d8a082] border-[#553a25]', dot: 'bg-[#c9805c]', match: p => p.includes('RCMC') || p.includes('RC1') },
+  { id: 'RAGE',    short: 'RAGE',     label: 'RAGE',                       badge: 'bg-[#351a1a] text-[#d88282] border-[#552525]', dot: 'bg-[#c95c5c]', match: p => p.startsWith('RAGE') },
+  { id: 'ALTION',  short: 'Altion',   label: 'Altion',                     badge: 'bg-[#1a352a] text-[#82d8b0] border-[#254a40]', dot: 'bg-[#5cc990]', match: p => p.includes('ALTION') },
+  { id: 'NN',      short: 'NN',       label: 'NN',                         badge: 'bg-[#251a35] text-[#a082d8] border-[#352555]', dot: 'bg-[#805cc9]', match: p => p.startsWith('NN') }
 ];
 
 const WARGA: FactionDef = {
-  id: 'WARGA', short: 'Warga', label: 'Civilian',
+  id: 'WARGA', short: 'Untagged', label: 'Untagged',
   badge: 'bg-[#252320] text-[#a09889] border-[#3a3630]',
   dot: 'bg-[#8f8578]',
   match: () => true
 };
 
 function detectFaction(name: string): string {
-  const prefix = name.split(' - ')[0].toUpperCase();
+  const prefix = name.split(' - ')[0].toUpperCase().trim();
   for (const f of FACTIONS) if (f.match(prefix)) return f.id;
   return 'WARGA';
 }
@@ -68,6 +81,40 @@ function pingClass(p: number) {
   return 'bg-[#2a1512] text-[#e09b7a] border-[#4a2520]';
 }
 
+/* ══════════════ Markdown Renderer ══════════════ */
+function renderMarkdown(text: string) {
+  return text.split('\n').map((line, i) => {
+    const parseBold = (str: string) => {
+      return str.split(/(\*\*.*?\*\*)/g).map((part, j) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return <strong key={j} className="font-semibold text-[#d4a574]">{part.slice(2, -2)}</strong>;
+        }
+        return part;
+      });
+    };
+
+    if (line.startsWith('### ') || line.startsWith('## ') || line.startsWith('# ')) {
+      const level = line.match(/^#+/)?.[0].length || 1;
+      const content = line.replace(/^#+\s+/, '');
+      return <div key={i} className={`font-semibold text-[#ebe3d5] mt-3 mb-1 ${level === 1 ? 'text-base' : 'text-sm'}`}>{content}</div>;
+    }
+
+    if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
+      const content = line.replace(/^[-*]\s+/, '');
+      return (
+        <div key={i} className="flex gap-2 ml-1 my-0.5">
+          <span className="text-[#5a554c]">•</span>
+          <span>{parseBold(content)}</span>
+        </div>
+      );
+    }
+
+    if (!line.trim()) return <div key={i} className="h-2" />;
+
+    return <div key={i} className="my-0.5">{parseBold(line)}</div>;
+  });
+}
+
 /* ══════════════ Main ══════════════ */
 export default function Home() {
   const [data, setData]         = useState<ApiData | null>(null);
@@ -80,7 +127,6 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [aiOpen, setAiOpen]     = useState(false);
 
-  /* Fetch loop */
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -104,13 +150,11 @@ export default function Home() {
     return () => clearInterval(id);
   }, [load]);
 
-  /* Enrich players with faction */
   const enriched = useMemo(
     () => (data?.players ?? []).map(p => ({ ...p, faction: detectFaction(p.name) })),
     [data]
   );
 
-  /* Faction counts */
   const counts = useMemo(() => {
     const c: Record<string, number> = { SEMUA: enriched.length };
     for (const f of [...FACTIONS, WARGA]) c[f.id] = 0;
@@ -118,7 +162,6 @@ export default function Home() {
     return c;
   }, [enriched]);
 
-  /* Filter: category → search */
   const filtered = useMemo(() => {
     let list = enriched;
     if (activeCat !== 'SEMUA') list = list.filter(p => p.faction === activeCat);
@@ -138,20 +181,18 @@ export default function Home() {
   useEffect(() => { if (page !== safePage) setPage(safePage); }, [page, safePage]);
   useEffect(() => { setPage(0); }, [search, activeCat]);
 
-  /* Nav categories */
   const navCats = useMemo(() => {
     const items = [
       { id: 'SEMUA', short: 'Semua', dot: 'bg-[#d4a574]' },
       ...FACTIONS.map(f => ({ id: f.id, short: f.short, dot: f.dot })),
-      { id: 'WARGA', short: 'Warga', dot: WARGA.dot }
+      { id: 'WARGA', short: WARGA.short, dot: WARGA.dot }
     ];
-    // sembunyikan faction kosong kecuali aktif
     return items.filter(it => (counts[it.id] ?? 0) > 0 || it.id === activeCat);
   }, [counts, activeCat]);
 
   return (
     <main className="min-h-screen bg-[#0c0a08] text-[#ebe3d5]">
-      {/* ── Floating pill nav (dynamic island) ── */}
+      {/* ── Floating pill nav ── */}
       <div className="fixed top-3 left-1/2 z-40 max-w-[calc(100vw-24px)] -translate-x-1/2">
         <div className="no-scrollbar flex items-center gap-1 overflow-x-auto rounded-full border border-[#2a2520] bg-[#15120f]/95 px-1.5 py-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5)] backdrop-blur-md">
           {navCats.map(cat => {
@@ -178,7 +219,6 @@ export default function Home() {
       </div>
 
       <div className="mx-auto max-w-5xl px-4 pb-16 pt-20 sm:px-6">
-        {/* ── Header ── */}
         <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
           <div>
             <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-[#5a554c]">
@@ -204,7 +244,6 @@ export default function Home() {
           </div>
         </header>
 
-        {/* ── Stats ── */}
         <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat label="Online"       value={data ? fmt(data.online) : '—'} accent="text-[#9dd88c]" />
           <Stat label="Max Slots"    value={data ? fmt(data.max)    : '—'} accent="text-[#82aed8]" />
@@ -218,7 +257,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── Toolbar ── */}
         <div className="mb-4 flex flex-wrap gap-3">
           <div className="relative min-w-[220px] flex-1">
             <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5a554c]" />
@@ -240,7 +278,6 @@ export default function Home() {
           </button>
         </div>
 
-        {/* ── Table ── */}
         <div className="overflow-hidden rounded-xl border border-[#2a2520] bg-[#12100e]">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -288,7 +325,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ── Footer ── */}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-[#5a554c]">
           <div>Auto-refresh 60 detik · {filtered.length} player</div>
           <div className="flex items-center gap-2">
@@ -313,7 +349,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ── AI Drawer ── */}
       <AIDrawer
         open={aiOpen}
         onClose={() => setAiOpen(false)}
@@ -353,7 +388,6 @@ function StatusBadge({ error, loading, refreshing }: { error: string | null; loa
   );
 }
 
-/* ─── AI Drawer ─── */
 function AIDrawer({
   open, onClose, data, enriched, counts, activeCat
 }: {
@@ -375,7 +409,6 @@ function AIDrawer({
 
   const buildContext = useCallback(() => {
     if (!data) return null;
-    // ringkasan faction
     const factionSummary: Record<string, { label: string; count: number }> = {};
     for (const [id, count] of Object.entries(counts)) {
       if (id === 'SEMUA') continue;
@@ -441,7 +474,6 @@ function AIDrawer({
           open ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-[#2a2520] px-5 py-4">
           <div className="flex items-center gap-2">
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#d4a574]/15">
@@ -459,7 +491,6 @@ function AIDrawer({
           </button>
         </div>
 
-        {/* Messages */}
         <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
           {msgs.length === 0 && (
             <div className="space-y-3">
@@ -483,13 +514,13 @@ function AIDrawer({
           {msgs.map((m, i) => (
             <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div
-                className={`max-w-[85%] whitespace-pre-wrap rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
+                className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
                   m.role === 'user'
-                    ? 'bg-[#d4a574] text-[#0c0a08]'
+                    ? 'bg-[#d4a574] text-[#0c0a08] whitespace-pre-wrap'
                     : 'border border-[#2a2520] bg-[#15120f] text-[#ebe3d5]'
                 }`}
               >
-                {m.content}
+                {m.role === 'user' ? m.content : renderMarkdown(m.content)}
               </div>
             </div>
           ))}
@@ -505,7 +536,6 @@ function AIDrawer({
           )}
         </div>
 
-        {/* Input */}
         <div className="border-t border-[#2a2520] p-3">
           <form
             onSubmit={e => { e.preventDefault(); send(input); }}
@@ -540,7 +570,6 @@ function AIDrawer({
   );
 }
 
-/* ─── Icons ─── */
 function SearchIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
