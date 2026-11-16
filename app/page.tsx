@@ -5,11 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 /* ══════════════ Types ══════════════ */
 type Player = { id: number; name: string; ping: number };
 type AiMsg = { role: 'user' | 'assistant'; content: string };
-type ApiData = {
-  ok: boolean; gate: string; online: number; max: number;
-  players: Player[]; updatedAt: string; error?: string;
-};
+type ApiData = { ok: boolean; gate: string; online: number; max: number; players: Player[]; updatedAt: string; error?: string; };
 type AuthStatus = 'LOADING' | 'UNAUTHORIZED' | 'PENDING' | 'APPROVED' | 'ADMIN' | 'BANNED' | 'TIMEOUT';
+type AccessRequest = { id: string; ipAddress: string; deviceId: string; status: string; timeoutUntil: string | null; reason: string | null; lastActive: string; createdAt: string; };
+type AuditLog = { id: string; adminName: string; action: string; targetDeviceId: string; details: string; createdAt: string; };
 
 /* ══════════════ Faction System ══════════════ */
 type FactionDef = { id: string; short: string; label: string; badge: string; dot: string; match: (p: string) => boolean; };
@@ -49,23 +48,14 @@ const PAGE_SIZE = 25;
 const fmt = (n: number) => n.toLocaleString('id-ID');
 function pingClass(p: number) { if (p < 80) return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'; if (p < 150) return 'bg-amber-500/10 text-amber-500 border-amber-500/20'; return 'bg-red-500/10 text-red-500 border-red-500/20'; }
 function formatTime(ms: number) { const totalSecs = Math.floor(ms / 1000); const h = Math.floor(totalSecs / 3600); const m = Math.floor((totalSecs % 3600) / 60); const s = totalSecs % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
+function formatDate(iso: string) { return new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }); }
 
 function renderMarkdown(text: string) {
-  // Bersihkan tag <think> jika masih lolos dari backend
   const cleanText = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-
   return cleanText.split('\n').map((line, i) => {
     const parseBold = (str: string) => str.split(/(\*\*.*?\*\*)/g).map((part, j) => part.startsWith('**') && part.endsWith('**') ? <strong key={j} className="font-semibold text-accent">{part.slice(2, -2)}</strong> : part);
-    
-    if (line.startsWith('### ') || line.startsWith('## ') || line.startsWith('# ')) { 
-      const level = line.match(/^#+/)?.[0].length || 1; 
-      return <div key={i} className={`font-semibold text-main mt-3 mb-1 ${level === 1 ? 'text-base' : 'text-sm'}`}>{line.replace(/^#+\s+/, '')}</div>; 
-    }
-    
-    if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
-      return <div key={i} className="flex gap-2 ml-1 my-0.5"><span className="text-subtle">•</span><span>{parseBold(line.replace(/^[-*]\s+/, ''))}</span></div>;
-    }
-    
+    if (line.startsWith('### ') || line.startsWith('## ') || line.startsWith('# ')) { const level = line.match(/^#+/)?.[0].length || 1; return <div key={i} className={`font-semibold text-main mt-3 mb-1 ${level === 1 ? 'text-base' : 'text-sm'}`}>{line.replace(/^#+\s+/, '')}</div>; }
+    if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) return <div key={i} className="flex gap-2 ml-1 my-0.5"><span className="text-subtle">•</span><span>{parseBold(line.replace(/^[-*]\s+/, ''))}</span></div>;
     if (!line.trim()) return <div key={i} className="h-2" />;
     return <div key={i} className="my-0.5">{parseBold(line)}</div>;
   });
@@ -75,18 +65,16 @@ function renderMarkdown(text: string) {
 export default function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>('LOADING');
   const [deviceId, setDeviceId] = useState<string>('');
-  const [timeoutUntil, setTimeoutUntil] = useState<string | null>(null);
+  const [authMeta, setAuthMeta] = useState<{ timeoutUntil?: string; reason?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
 
-  // Init Device ID
   useEffect(() => {
     let id = localStorage.getItem('ime-device-id');
     if (!id) { id = crypto.randomUUID(); localStorage.setItem('ime-device-id', id); }
     setDeviceId(id);
   }, []);
 
-  // Check Auth Status (Polling every 10s)
   useEffect(() => {
     if (!deviceId) return;
     const checkAuth = async () => {
@@ -94,7 +82,7 @@ export default function App() {
         const res = await fetch(`/api/auth/status?deviceId=${deviceId}`);
         const json = await res.json();
         setAuthStatus(json.status);
-        if (json.timeoutUntil) setTimeoutUntil(json.timeoutUntil);
+        setAuthMeta({ timeoutUntil: json.timeoutUntil, reason: json.reason });
       } catch { setAuthStatus('UNAUTHORIZED'); }
     };
     checkAuth();
@@ -113,19 +101,13 @@ export default function App() {
     );
   }
 
-  // Tampilkan Lock Screen jika tidak punya akses
   if (['UNAUTHORIZED', 'PENDING', 'BANNED', 'TIMEOUT'].includes(authStatus)) {
-    return <LockScreen deviceId={deviceId} status={authStatus} timeoutUntil={timeoutUntil} onRefresh={() => window.location.reload()} />;
+    return <LockScreen deviceId={deviceId} status={authStatus} meta={authMeta} onRefresh={() => window.location.reload()} />;
   }
 
-  // Tampilkan Web Utama
   return (
     <>
-      <Home 
-        isAdmin={authStatus === 'ADMIN'} 
-        onOpenSettings={() => setSettingsOpen(true)} 
-        onOpenAdmin={() => setAdminOpen(true)} 
-      />
+      <Home isAdmin={authStatus === 'ADMIN'} onOpenSettings={() => setSettingsOpen(true)} onOpenAdmin={() => setAdminOpen(true)} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {authStatus === 'ADMIN' && <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />}
     </>
@@ -133,7 +115,7 @@ export default function App() {
 }
 
 /* ══════════════ Lock Screen ══════════════ */
-function LockScreen({ deviceId, status, timeoutUntil, onRefresh }: { deviceId: string, status: string, timeoutUntil: string | null, onRefresh: () => void }) {
+function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string, status: string, meta: any, onRefresh: () => void }) {
   const [loading, setLoading] = useState(false);
   const requestAccess = async () => {
     setLoading(true);
@@ -144,9 +126,9 @@ function LockScreen({ deviceId, status, timeoutUntil, onRefresh }: { deviceId: s
   return (
     <div className="flex min-h-screen items-center justify-center bg-app p-4 text-main">
       <div className="w-full max-w-md rounded-2xl border border-line bg-card p-8 text-center shadow-2xl">
-        <div className={`mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full ${status === 'BANNED' ? 'bg-red-500/15 text-red-500' : 'bg-accent/15 text-accent'}`}>
+        <div className={`mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full ${status === 'BANNED' || status === 'TIMEOUT' ? 'bg-red-500/15 text-red-500' : 'bg-accent/15 text-accent'}`}>
           <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            {status === 'BANNED' ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /> : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />}
+            {status === 'BANNED' || status === 'TIMEOUT' ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /> : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />}
           </svg>
         </div>
         
@@ -156,10 +138,25 @@ function LockScreen({ deviceId, status, timeoutUntil, onRefresh }: { deviceId: s
         
         <p className="mt-2 text-sm text-muted">
           {status === 'BANNED' ? 'Kamu telah melanggar aturan dan dilarang mengakses web ini.' :
-           status === 'TIMEOUT' ? `Akses kamu ditangguhkan sementara. Silakan coba lagi setelah: ${timeoutUntil ? new Date(timeoutUntil).toLocaleString('id-ID') : ''}` :
+           status === 'TIMEOUT' ? 'Akses kamu ditangguhkan sementara.' :
            status === 'PENDING' ? '⏳ Menunggu Hans (Admin) menyetujui permintaan akses kamu. Halaman ini akan terbuka otomatis jika sudah di-approve.' :
            'Website ini bersifat privat. Kamu harus meminta izin akses dari Admin Hans terlebih dahulu.'}
         </p>
+
+        {/* Tampilkan Alasan dan Waktu */}
+        {(status === 'BANNED' || status === 'TIMEOUT') && (
+          <div className="mt-4 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-left">
+            <div className="text-xs font-semibold uppercase text-red-400">Alasan:</div>
+            <div className="mt-1 text-sm text-red-200">{meta?.reason || 'Tidak ada alasan spesifik.'}</div>
+            
+            {status === 'TIMEOUT' && meta?.timeoutUntil && (
+              <div className="mt-3 text-xs text-red-300">
+                Dibuka kembali pada: <br/>
+                <span className="font-mono font-bold text-red-200">{new Date(meta.timeoutUntil).toLocaleString('id-ID')}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {status === 'UNAUTHORIZED' && (
           <button onClick={requestAccess} disabled={loading} className="mt-6 w-full rounded-xl bg-accent py-3 text-sm font-bold text-accent-text transition hover:bg-accent-hover disabled:opacity-50">
@@ -175,26 +172,71 @@ function LockScreen({ deviceId, status, timeoutUntil, onRefresh }: { deviceId: s
 
 /* ══════════════ Admin Panel (Full-Screen) ══════════════ */
 function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
-  const [requests, setRequests] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'requests' | 'audit'>('requests');
+  const [requests, setRequests] = useState<AccessRequest[]>([]);
+  const [logs, setLogs] = useState<AuditLog[]>([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('ALL');
+  
+  // Bulk Selection
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  
+  // Custom Action Modal
+  const [actionModal, setActionModal] = useState<{ type: 'BAN' | 'TIMEOUT', id?: string } | null>(null);
+  const [reasonInput, setReasonInput] = useState('');
+  const [durationInput, setDurationInput] = useState('60'); // default 1 jam
 
-  const fetchReqs = useCallback(async () => {
-    const res = await fetch('/api/admin/requests');
-    if (res.ok) setRequests(await res.json());
-  }, []);
+  const fetchData = useCallback(async () => {
+    if (activeTab === 'requests') {
+      const res = await fetch('/api/admin/requests');
+      if (res.ok) setRequests(await res.json());
+    } else {
+      const res = await fetch('/api/admin/audit');
+      if (res.ok) setLogs(await res.json());
+    }
+  }, [activeTab]);
 
   useEffect(() => { 
     if (open) {
-      fetchReqs(); 
-      const int = setInterval(fetchReqs, 5000); 
+      fetchData(); 
+      const int = setInterval(fetchData, 5000); 
       return () => clearInterval(int);
     } 
-  }, [open, fetchReqs]);
+  }, [open, fetchData]);
 
-  const updateStatus = async (id: string, action: string) => {
-    await fetch('/api/admin/requests', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action }) });
-    fetchReqs();
+  const executeAction = async (id: string, action: string, reason?: string, durationMinutes?: number) => {
+    await fetch('/api/admin/requests', { 
+      method: 'PATCH', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify({ id, action, reason, durationMinutes }) 
+    });
+    fetchData();
+    setActionModal(null);
+    setReasonInput('');
+  };
+
+  const executeBulk = async (action: string) => {
+    if (selected.size === 0) return;
+    if (action === 'BAN' && !confirm(`Yakin ingin mem-ban ${selected.size} user sekaligus?`)) return;
+    
+    await fetch('/api/admin/requests', { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify({ ids: Array.from(selected), action }) 
+    });
+    setSelected(new Set());
+    fetchData();
+  };
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelected(next);
+  };
+
+  const toggleAll = () => {
+    if (selected.size === filtered.length) setSelected(new Set());
+    else setSelected(new Set(filtered.map(r => r.id)));
   };
 
   const filtered = requests.filter(r => {
@@ -207,7 +249,7 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-app">
-      <header className="flex items-center justify-between border-b border-line bg-card px-4 py-4 shadow-sm sm:px-6">
+      <header className="flex flex-col border-b border-line bg-card px-4 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div>
           <h1 className="text-lg font-bold flex items-center gap-2 sm:text-xl">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-500">
@@ -217,112 +259,181 @@ function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
           </h1>
           <p className="text-xs text-muted mt-1 sm:text-sm">Selamat datang, Hans.</p>
         </div>
-        <button onClick={onClose} className="rounded-lg bg-hover px-4 py-2 text-sm font-medium hover:bg-line transition">Tutup Panel</button>
+        
+        <div className="mt-4 flex items-center gap-2 sm:mt-0">
+          <div className="flex rounded-lg border border-line bg-app p-1">
+            <button onClick={() => setActiveTab('requests')} className={`rounded-md px-4 py-1.5 text-xs font-medium transition ${activeTab === 'requests' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Requests</button>
+            <button onClick={() => setActiveTab('audit')} className={`rounded-md px-4 py-1.5 text-xs font-medium transition ${activeTab === 'audit' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Audit Log</button>
+          </div>
+          <button onClick={onClose} className="rounded-lg bg-hover px-4 py-2 text-sm font-medium hover:bg-line transition">Tutup</button>
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         <div className="mx-auto max-w-6xl space-y-6">
           
-          {/* Toolbar */}
-          <div className="flex flex-col sm:flex-row justify-between gap-4">
-            <div className="flex flex-wrap gap-2">
-              {['ALL', 'PENDING', 'APPROVED', 'BANNED'].map(f => (
-                <button key={f} onClick={() => setFilter(f)} className={`rounded-lg px-4 py-2 text-xs font-medium transition sm:text-sm ${filter === f ? 'bg-accent text-accent-text' : 'bg-card border border-line text-muted hover:text-main'}`}>{f}</button>
-              ))}
-            </div>
-            <div className="relative w-full sm:w-64">
-              <input type="text" placeholder="Cari IP atau Device ID..." value={search} onChange={e => setSearch(e.target.value)} className="w-full rounded-lg border border-line bg-card px-4 py-2 text-sm text-main outline-none focus:border-accent" />
-            </div>
-          </div>
+          {activeTab === 'requests' && (
+            <>
+              {/* Toolbar & Bulk Actions */}
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  {['ALL', 'PENDING', 'APPROVED', 'BANNED'].map(f => (
+                    <button key={f} onClick={() => setFilter(f)} className={`rounded-lg px-4 py-2 text-xs font-medium transition sm:text-sm ${filter === f ? 'bg-accent text-accent-text' : 'bg-card border border-line text-muted hover:text-main'}`}>{f}</button>
+                  ))}
+                  <div className="h-6 w-px bg-line mx-1" />
+                  <button onClick={() => executeBulk('APPROVE')} disabled={selected.size === 0} className="rounded-lg bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-500 hover:bg-emerald-500/20 disabled:opacity-30">Approve Selected ({selected.size})</button>
+                  <button onClick={() => executeBulk('BAN')} disabled={selected.size === 0} className="rounded-lg bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-500 hover:bg-red-500/20 disabled:opacity-30">Ban Selected ({selected.size})</button>
+                </div>
+                <div className="relative w-full sm:w-64">
+                  <input type="text" placeholder="Cari IP atau Device ID..." value={search} onChange={e => setSearch(e.target.value)} className="w-full rounded-lg border border-line bg-card px-4 py-2 text-sm text-main outline-none focus:border-accent" />
+                </div>
+              </div>
 
-          {/* Table */}
-          <div className="rounded-xl border border-line bg-card overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left whitespace-nowrap">
-                <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
-                  <tr>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">IP Address & Device ID</th>
-                    <th className="px-4 py-3">Terakhir Aktif</th>
-                    <th className="px-4 py-3 text-right">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map(r => {
-                    const isOnline = new Date(r.lastActive).getTime() > Date.now() - 60000;
-                    return (
-                      <tr key={r.id} className="border-t border-line hover:bg-hover/50 transition">
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-2">
-                            <span className={`h-2.5 w-2.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-line'}`} title={isOnline ? 'Online' : 'Offline'} />
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              r.status === 'APPROVED' ? 'bg-emerald-500/20 text-emerald-500' :
-                              r.status === 'PENDING' ? 'bg-amber-500/20 text-amber-500' :
-                              r.status === 'BANNED' ? 'bg-red-500/20 text-red-500' : 'bg-gray-500/20 text-gray-500'
-                            }`}>{r.status}</span>
-                            {r.timeoutUntil && new Date(r.timeoutUntil) > new Date() && (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-500">TIMEOUT</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-4">
-                          <div className="font-medium text-main">{r.ipAddress}</div>
-                          <div className="font-mono text-[11px] text-subtle mt-0.5">{r.deviceId}</div>
-                        </td>
-                        <td className="px-4 py-4 text-muted text-xs">
-                          {new Date(r.lastActive).toLocaleString('id-ID')}
-                        </td>
-                        
-                        <td className="px-4 py-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            
-                            {r.status === 'BANNED' ? (
-                              <button onClick={() => updateStatus(r.id, 'REVOKE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-3 py-1 rounded text-xs font-medium transition">Unban</button>
-                            ) : r.timeoutUntil && new Date(r.timeoutUntil) > new Date() ? (
-                              <button onClick={() => updateStatus(r.id, 'CLEAR_TIMEOUT')} className="bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 px-3 py-1 rounded text-xs font-medium transition">Hapus Timeout</button>
-                            ) : (
-                              <>
-                                {r.status !== 'APPROVED' && (
-                                  <button onClick={() => updateStatus(r.id, 'APPROVE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-2 py-1 rounded text-xs font-medium transition">Approve</button>
-                                )}
-                                {r.status === 'APPROVED' && (
-                                  <button onClick={() => updateStatus(r.id, 'REVOKE')} className="bg-hover text-muted hover:text-main px-2 py-1 rounded text-xs font-medium transition">Revoke</button>
-                                )}
-                                <div className="h-4 w-px bg-line mx-1" />
-                                <button onClick={() => updateStatus(r.id, 'TIMEOUT_1H')} className="text-orange-500 hover:bg-orange-500/10 px-2 py-1 rounded text-xs font-medium transition" title="Beri waktu jeda 1 Jam">1H</button>
-                                <button onClick={() => updateStatus(r.id, 'BAN')} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-xs font-medium transition">Ban</button>
-                              </>
-                            )}
-
-                          </div>
-                        </td>
+              {/* Table */}
+              <div className="rounded-xl border border-line bg-card overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left whitespace-nowrap">
+                    <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
+                      <tr>
+                        <th className="px-4 py-3 w-10">
+                          <input type="checkbox" checked={selected.size > 0 && selected.size === filtered.length} onChange={toggleAll} className="cursor-pointer accent-accent" />
+                        </th>
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3">User Info</th>
+                        <th className="px-4 py-3">Aksi</th>
                       </tr>
-                    );
-                  })}
-                  {filtered.length === 0 && <tr><td colSpan={4} className="px-4 py-10 text-center text-subtle">Tidak ada data request.</td></tr>}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {filtered.map(r => {
+                        const isOnline = new Date(r.lastActive).getTime() > Date.now() - 60000;
+                        const isTimeout = r.timeoutUntil && new Date(r.timeoutUntil) > new Date();
+                        return (
+                          <tr key={r.id} className="border-t border-line hover:bg-hover/50 transition">
+                            <td className="px-4 py-4">
+                              <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSelect(r.id)} className="cursor-pointer accent-accent" />
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="flex items-center gap-2">
+                                <span className={`h-2.5 w-2.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-line'}`} title={isOnline ? 'Online' : 'Offline'} />
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${r.status === 'APPROVED' ? 'bg-emerald-500/20 text-emerald-500' : r.status === 'PENDING' ? 'bg-amber-500/20 text-amber-500' : r.status === 'BANNED' ? 'bg-red-500/20 text-red-500' : 'bg-gray-500/20 text-gray-500'}`}>{r.status}</span>
+                                {isTimeout && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-500">TIMEOUT</span>}
+                              </div>
+                              {r.reason && <div className="mt-1 text-[10px] text-muted max-w-[120px] truncate" title={r.reason}>Ket: {r.reason}</div>}
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="font-medium text-main">{r.ipAddress}</div>
+                              <div className="font-mono text-[11px] text-subtle mt-0.5">{r.deviceId}</div>
+                              <div className="text-[10px] text-muted mt-0.5">Active: {formatDate(r.lastActive)}</div>
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {r.status === 'BANNED' ? (
+                                  <button onClick={() => executeAction(r.id, 'REVOKE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-2 py-1 rounded text-[11px] font-medium">Unban</button>
+                                ) : isTimeout ? (
+                                  <button onClick={() => executeAction(r.id, 'CLEAR_TIMEOUT')} className="bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 px-2 py-1 rounded text-[11px] font-medium">Hapus TO</button>
+                                ) : (
+                                  <>
+                                    {r.status !== 'APPROVED' && <button onClick={() => executeAction(r.id, 'APPROVE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-2 py-1 rounded text-[11px] font-medium">ACC</button>}
+                                    {r.status === 'APPROVED' && <button onClick={() => executeAction(r.id, 'REVOKE')} className="bg-hover text-muted hover:text-main px-2 py-1 rounded text-[11px] font-medium">Revoke</button>}
+                                    
+                                    <button onClick={() => { setActionModal({ type: 'TIMEOUT', id: r.id }); setReasonInput(''); setDurationInput('60'); }} className="text-orange-500 hover:bg-orange-500/10 px-2 py-1 rounded text-[11px] font-medium border border-transparent">Timeout</button>
+                                    <button onClick={() => { setActionModal({ type: 'BAN', id: r.id }); setReasonInput(''); }} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-[11px] font-medium border border-transparent">Ban</button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeTab === 'audit' && (
+            <div className="rounded-xl border border-line bg-card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left whitespace-nowrap">
+                  <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
+                    <tr>
+                      <th className="px-4 py-3">Waktu</th>
+                      <th className="px-4 py-3">Admin</th>
+                      <th className="px-4 py-3">Aksi</th>
+                      <th className="px-4 py-3">Target</th>
+                      <th className="px-4 py-3">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logs.map(l => (
+                      <tr key={l.id} className="border-t border-line hover:bg-hover/50 transition">
+                        <td className="px-4 py-3 text-muted text-xs">{formatDate(l.createdAt)}</td>
+                        <td className="px-4 py-3 font-medium text-main">{l.adminName}</td>
+                        <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-hover text-main border border-line">{l.action}</span></td>
+                        <td className="px-4 py-3 font-mono text-[11px] text-subtle">{l.targetDeviceId}</td>
+                        <td className="px-4 py-3 text-muted text-xs">{l.details || '-'}</td>
+                      </tr>
+                    ))}
+                    {logs.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-subtle">Belum ada log aktivitas.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Modal Input Alasan Ban/Timeout */}
+      {actionModal && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-line bg-card p-5 shadow-2xl">
+            <h3 className="text-lg font-bold text-main mb-4">
+              {actionModal.type === 'BAN' ? 'Blokir Permanen (Ban)' : 'Beri Jeda (Timeout)'}
+            </h3>
+            
+            <label className="text-xs font-semibold text-muted mb-1 block">Alasan</label>
+            <input type="text" value={reasonInput} onChange={e => setReasonInput(e.target.value)} placeholder="Contoh: Spam request, nakal, dll." className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent mb-3" />
+            
+            {actionModal.type === 'TIMEOUT' && (
+              <>
+                <label className="text-xs font-semibold text-muted mb-1 block">Durasi (Menit)</label>
+                <select value={durationInput} onChange={e => setDurationInput(e.target.value)} className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent mb-4">
+                  <option value="15">15 Menit</option>
+                  <option value="60">1 Jam</option>
+                  <option value="360">6 Jam</option>
+                  <option value="1440">24 Jam</option>
+                </select>
+              </>
+            )}
+
+            <div className="flex justify-end gap-2 mt-2">
+              <button onClick={() => setActionModal(null)} className="rounded-lg px-4 py-2 text-sm font-medium text-muted hover:text-main">Batal</button>
+              <button onClick={() => executeAction(actionModal.id!, actionModal.type, reasonInput, Number(durationInput))} className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${actionModal.type === 'BAN' ? 'bg-red-500 hover:bg-red-600' : 'bg-orange-500 hover:bg-orange-600'}`}>
+                Konfirmasi
+              </button>
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
 /* ══════════════ Main Home (Player Monitor) ══════════════ */
 function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOpenSettings: () => void, onOpenAdmin: () => void }) {
-  const [data, setData]         = useState<ApiData | null>(null);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState<string | null>(null);
-  const [search, setSearch]     = useState('');
+  const [data, setData] = useState<ApiData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
   const [activeCat, setActiveCat] = useState<string>('SEMUA');
-  const [page, setPage]         = useState(0);
+  const [page, setPage] = useState(0);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [aiOpen, setAiOpen]     = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
   
-  const [theme, setTheme] = useState<'dark' | 'light' | 'glass'>('dark');
+  const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
   const [refreshMs, setRefreshMs] = useState(60000);
   const [compactMode, setCompactMode] = useState(false);
   const [countdown, setCountdown] = useState<{ diffMs: number, target: Date } | null>(null);
@@ -342,6 +453,21 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
   }, [theme]);
   useEffect(() => { localStorage.setItem('ime-refresh', String(refreshMs)); }, [refreshMs]);
   useEffect(() => { localStorage.setItem('ime-compact', String(compactMode)); }, [compactMode]);
+
+  // Fetch pending count for Admin Badge
+  useEffect(() => {
+    if (!isAdmin) return;
+    const fetchPending = async () => {
+      const res = await fetch('/api/admin/requests');
+      if (res.ok) {
+        const reqs = await res.json();
+        setPendingCount(reqs.filter((r: any) => r.status === 'PENDING').length);
+      }
+    };
+    fetchPending();
+    const int = setInterval(fetchPending, 15000);
+    return () => clearInterval(int);
+  }, [isAdmin]);
 
   useEffect(() => {
     const updateTimer = () => {
@@ -465,9 +591,14 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
             )}
 
             {isAdmin && (
-              <button onClick={onOpenAdmin} className="flex h-8 items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 text-emerald-500 transition hover:bg-emerald-500/20" title="Admin Panel">
+              <button onClick={onOpenAdmin} className="relative flex h-8 items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 text-emerald-500 transition hover:bg-emerald-500/20" title="Admin Panel">
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
                 <span className="text-xs font-semibold">Admin</span>
+                {pendingCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white border-2 border-app">
+                    {pendingCount}
+                  </span>
+                )}
               </button>
             )}
 
@@ -496,13 +627,8 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
           <Stat label="Terakhir" value={lastFetch ? lastFetch.toLocaleTimeString('id-ID') : '—'} accent="text-muted" small />
         </section>
 
-        {error && (
-          <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
-            ⚠ {error}
-          </div>
-        )}
+        {error && <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">⚠ {error}</div>}
 
-        {/* Search & Refresh (Full width on Mobile) */}
         <div className="mb-4 flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
             <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
@@ -548,7 +674,6 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
           </div>
         </div>
 
-        {/* Footer & Pagination (Mobile Optimized) */}
         <div className="mt-4 flex flex-col items-center justify-between gap-4 text-xs text-muted sm:flex-row">
           <div className="order-2 sm:order-1">Auto-refresh {refreshMs/1000} detik · {filtered.length} player</div>
           <div className="order-1 flex w-full items-center justify-between gap-2 sm:order-2 sm:w-auto">
@@ -566,7 +691,7 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
 
 /* ══════════════ Settings Modal ══════════════ */
 function SettingsModal({ open, onClose }: { open: boolean, onClose: () => void }) {
-  const [theme, setTheme] = useState<'dark' | 'light' | 'glass'>('dark');
+  const [theme, setTheme] = useState<'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord'>('dark');
   const [refreshMs, setRefreshMs] = useState(60000);
   const [compactMode, setCompactMode] = useState(false);
 
@@ -594,15 +719,21 @@ function SettingsModal({ open, onClose }: { open: boolean, onClose: () => void }
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div className="flex items-center gap-2">
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15"><GearIcon className="h-4 w-4 text-accent" /></span>
-            <div><div className="text-sm font-semibold text-main">Pengaturan</div><div className="text-[11px] text-subtle">Sesuaikan tampilan & preferensi</div></div>
+            <div><div className="text-sm font-semibold text-main">Pengaturan</div><div className="text-[11px] text-subtle">Tampilan & preferensi</div></div>
           </div>
           <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
         </div>
         <div className="space-y-6 px-5 py-5">
           <div>
             <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Tema Tampilan</div>
-            <div className="grid grid-cols-3 gap-3">
-              {[{ id: 'dark', label: 'Dark', bg: 'bg-[#0c0a08]', border: 'border-[#2a2520]' }, { id: 'light', label: 'Light', bg: 'bg-[#f8fafc]', border: 'border-[#e2e8f0]' }, { id: 'glass', label: 'Glass', bg: 'bg-[#09090b]', border: 'border-white/10' }].map(t => (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {[
+                { id: 'dark', label: 'Dark', bg: 'bg-[#0c0a08]', border: 'border-[#2a2520]' }, 
+                { id: 'light', label: 'Light', bg: 'bg-[#f8fafc]', border: 'border-[#e2e8f0]' }, 
+                { id: 'glass', label: 'Glass', bg: 'bg-[#09090b]', border: 'border-white/10' },
+                { id: 'cyberpunk', label: 'Cyberpunk', bg: 'bg-[#050505]', border: 'border-[#fcee0a]' },
+                { id: 'nord', label: 'Nord', bg: 'bg-[#2e3440]', border: 'border-[#4c566a]' }
+              ].map(t => (
                 <button key={t.id} onClick={() => setTheme(t.id as any)} className={`group relative flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${theme === t.id ? 'border-accent ring-2 ring-accent/20' : 'border-line hover:border-accent/40'}`}>
                   <div className={`h-10 w-full rounded-md border ${t.bg} ${t.border} flex items-center justify-center`}><div className={`h-1.5 w-6 rounded-full ${theme === t.id ? 'bg-accent' : 'bg-line'}`} /></div>
                   <span className={`text-xs font-medium ${theme === t.id ? 'text-accent' : 'text-muted group-hover:text-main'}`}>{t.label}</span>
@@ -672,7 +803,7 @@ function AIDrawer({ open, onClose, data, enriched, counts, activeCat }: any) {
       <div onClick={onClose} className={`absolute inset-0 bg-black/50 transition-opacity ${open ? 'opacity-100' : 'opacity-0'}`} />
       <aside className={`absolute right-0 top-0 flex h-full w-full flex-col border-l border-line bg-app transition-transform duration-300 sm:w-[440px] ${open ? 'translate-x-0' : 'translate-x-full'}`}>
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15"><SparkIcon className="h-4 w-4 text-accent" /></span><div><div className="text-sm font-semibold text-main">Analisis AI</div><div className="text-[11px] text-subtle">Punya konteks data player realtime</div></div></div>
+          <div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15"><SparkIcon className="h-4 w-4 text-accent" /></span><div><div className="text-sm font-semibold text-main">Analisis AI</div><div className="text-[11px] text-subtle">Konteks data realtime</div></div></div>
           <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
         </div>
         <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
