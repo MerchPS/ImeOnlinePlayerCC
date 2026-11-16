@@ -6,26 +6,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 type Player = { id: number; name: string; ping: number };
 type AiMsg = { role: 'user' | 'assistant'; content: string };
 type ApiData = {
-  ok: boolean;
-  gate: string;
-  online: number;
-  max: number;
-  players: Player[];
-  updatedAt: string;
-  error?: string;
+  ok: boolean; gate: string; online: number; max: number;
+  players: Player[]; updatedAt: string; error?: string;
 };
-type AuthStatus = 'LOADING' | 'UNAUTHORIZED' | 'PENDING' | 'APPROVED' | 'ADMIN';
+type AuthStatus = 'LOADING' | 'UNAUTHORIZED' | 'PENDING' | 'APPROVED' | 'ADMIN' | 'BANNED' | 'TIMEOUT';
 
-/* ══════════════ Faction system ══════════════ */
-type FactionDef = {
-  id: string;
-  short: string;
-  label: string;
-  badge: string;
-  dot: string;
-  match: (p: string) => boolean;
-};
-
+/* ══════════════ Faction System ══════════════ */
+type FactionDef = { id: string; short: string; label: string; badge: string; dot: string; match: (p: string) => boolean; };
 const FACTIONS: FactionDef[] = [
   { id: 'CC',      short: 'CC',       label: 'Crimson Creed',             badge: 'bg-[#3a1f1a] text-[#e09b7a] border-[#5a2f25]', dot: 'bg-[#c97a5c]', match: p => p.includes('CC') },
   { id: 'LSPD',    short: 'LSPD',     label: 'Polisi Kota',                badge: 'bg-[#1a2535] text-[#82aed8] border-[#253a55]', dot: 'bg-[#6a9dd8]', match: p => p.includes('LSPD') },
@@ -53,89 +40,41 @@ const FACTIONS: FactionDef[] = [
   { id: 'ALTION',  short: 'Altion',   label: 'Altion',                     badge: 'bg-[#1a352a] text-[#82d8b0] border-[#254a40]', dot: 'bg-[#5cc990]', match: p => p.includes('ALTION') },
   { id: 'NN',      short: 'NN',       label: 'NN',                         badge: 'bg-[#251a35] text-[#a082d8] border-[#352555]', dot: 'bg-[#805cc9]', match: p => p.startsWith('NN') }
 ];
-
-const WARGA: FactionDef = {
-  id: 'WARGA', short: 'Untagged', label: 'Untagged',
-  badge: 'bg-hover text-muted border-line',
-  dot: 'bg-muted',
-  match: () => true
-};
-
-function detectFaction(name: string): string {
-  const prefix = name.split(' - ')[0].toUpperCase().trim();
-  for (const f of FACTIONS) if (f.match(prefix)) return f.id;
-  return 'WARGA';
-}
-
-function factionOf(id: string): FactionDef {
-  return FACTIONS.find(f => f.id === id) ?? WARGA;
-}
+const WARGA: FactionDef = { id: 'WARGA', short: 'Untagged', label: 'Untagged', badge: 'bg-hover text-muted border-line', dot: 'bg-muted', match: () => true };
+function detectFaction(name: string): string { const prefix = name.split(' - ')[0].toUpperCase().trim(); for (const f of FACTIONS) if (f.match(prefix)) return f.id; return 'WARGA'; }
+function factionOf(id: string): FactionDef { return FACTIONS.find(f => f.id === id) ?? WARGA; }
 
 /* ══════════════ Utils ══════════════ */
 const PAGE_SIZE = 25;
 const fmt = (n: number) => n.toLocaleString('id-ID');
-
-function pingClass(p: number) {
-  if (p < 80)  return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
-  if (p < 150) return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
-  return 'bg-red-500/10 text-red-500 border-red-500/20';
-}
-
-function formatTime(ms: number) {
-  const totalSecs = Math.floor(ms / 1000);
-  const h = Math.floor(totalSecs / 3600);
-  const m = Math.floor((totalSecs % 3600) / 60);
-  const s = totalSecs % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
-
+function pingClass(p: number) { if (p < 80) return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'; if (p < 150) return 'bg-amber-500/10 text-amber-500 border-amber-500/20'; return 'bg-red-500/10 text-red-500 border-red-500/20'; }
+function formatTime(ms: number) { const totalSecs = Math.floor(ms / 1000); const h = Math.floor(totalSecs / 3600); const m = Math.floor((totalSecs % 3600) / 60); const s = totalSecs % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
 function renderMarkdown(text: string) {
   return text.split('\n').map((line, i) => {
-    const parseBold = (str: string) => {
-      return str.split(/(\*\*.*?\*\*)/g).map((part, j) => {
-        if (part.startsWith('**') && part.endsWith('**')) {
-          return <strong key={j} className="font-semibold text-accent">{part.slice(2, -2)}</strong>;
-        }
-        return part;
-      });
-    };
-    if (line.startsWith('### ') || line.startsWith('## ') || line.startsWith('# ')) {
-      const level = line.match(/^#+/)?.[0].length || 1;
-      const content = line.replace(/^#+\s+/, '');
-      return <div key={i} className={`font-semibold text-main mt-3 mb-1 ${level === 1 ? 'text-base' : 'text-sm'}`}>{content}</div>;
-    }
-    if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
-      const content = line.replace(/^[-*]\s+/, '');
-      return (
-        <div key={i} className="flex gap-2 ml-1 my-0.5">
-          <span className="text-subtle">•</span>
-          <span>{parseBold(content)}</span>
-        </div>
-      );
-    }
+    const parseBold = (str: string) => str.split(/(\*\*.*?\*\*)/g).map((part, j) => part.startsWith('**') && part.endsWith('**') ? <strong key={j} className="font-semibold text-accent">{part.slice(2, -2)}</strong> : part);
+    if (line.startsWith('### ') || line.startsWith('## ') || line.startsWith('# ')) { const level = line.match(/^#+/)?.[0].length || 1; return <div key={i} className={`font-semibold text-main mt-3 mb-1 ${level === 1 ? 'text-base' : 'text-sm'}`}>{line.replace(/^#+\s+/, '')}</div>; }
+    if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) return <div key={i} className="flex gap-2 ml-1 my-0.5"><span className="text-subtle">•</span><span>{parseBold(line.replace(/^[-*]\s+/, ''))}</span></div>;
     if (!line.trim()) return <div key={i} className="h-2" />;
     return <div key={i} className="my-0.5">{parseBold(line)}</div>;
   });
 }
 
-/* ══════════════ Main App ══════════════ */
+/* ══════════════ Main App Component ══════════════ */
 export default function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>('LOADING');
   const [deviceId, setDeviceId] = useState<string>('');
+  const [timeoutUntil, setTimeoutUntil] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
 
-  // Initialize Device ID
+  // Init Device ID
   useEffect(() => {
     let id = localStorage.getItem('ime-device-id');
-    if (!id) {
-      id = crypto.randomUUID();
-      localStorage.setItem('ime-device-id', id);
-    }
+    if (!id) { id = crypto.randomUUID(); localStorage.setItem('ime-device-id', id); }
     setDeviceId(id);
   }, []);
 
-  // Check Auth Status
+  // Check Auth Status (Polling every 10s)
   useEffect(() => {
     if (!deviceId) return;
     const checkAuth = async () => {
@@ -143,158 +82,199 @@ export default function App() {
         const res = await fetch(`/api/auth/status?deviceId=${deviceId}`);
         const json = await res.json();
         setAuthStatus(json.status);
-      } catch {
-        setAuthStatus('UNAUTHORIZED');
-      }
+        if (json.timeoutUntil) setTimeoutUntil(json.timeoutUntil);
+      } catch { setAuthStatus('UNAUTHORIZED'); }
     };
     checkAuth();
-    const interval = setInterval(checkAuth, 10000); // Cek tiap 10 detik jika PENDING
+    const interval = setInterval(checkAuth, 10000);
     return () => clearInterval(interval);
   }, [deviceId]);
 
   if (authStatus === 'LOADING') {
-    return <div className="flex min-h-screen items-center justify-center bg-app text-main">Memuat...</div>;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-app text-main">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+          <span className="text-sm font-mono text-muted">Memeriksa akses...</span>
+        </div>
+      </div>
+    );
   }
 
-  // 1. LAYAR GEMBOK (Belum punya akses)
-  if (authStatus === 'UNAUTHORIZED' || authStatus === 'PENDING') {
-    return <LockScreen deviceId={deviceId} status={authStatus} onRefresh={() => window.location.reload()} />;
+  // Tampilkan Lock Screen jika tidak punya akses
+  if (['UNAUTHORIZED', 'PENDING', 'BANNED', 'TIMEOUT'].includes(authStatus)) {
+    return <LockScreen deviceId={deviceId} status={authStatus} timeoutUntil={timeoutUntil} onRefresh={() => window.location.reload()} />;
   }
 
-  // 2. LAYAR UTAMA (APPROVED atau ADMIN)
+  // Tampilkan Web Utama
   return (
     <>
       <Home 
         isAdmin={authStatus === 'ADMIN'} 
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenAdmin={() => setAdminOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)} 
+        onOpenAdmin={() => setAdminOpen(true)} 
       />
-      
-      <SettingsModal 
-        open={settingsOpen} 
-        onClose={() => setSettingsOpen(false)}
-      />
-
-      {authStatus === 'ADMIN' && (
-        <AdminModal 
-          open={adminOpen} 
-          onClose={() => setAdminOpen(false)} 
-        />
-      )}
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {authStatus === 'ADMIN' && <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />}
     </>
   );
 }
 
 /* ══════════════ Lock Screen ══════════════ */
-function LockScreen({ deviceId, status, onRefresh }: { deviceId: string, status: string, onRefresh: () => void }) {
+function LockScreen({ deviceId, status, timeoutUntil, onRefresh }: { deviceId: string, status: string, timeoutUntil: string | null, onRefresh: () => void }) {
   const [loading, setLoading] = useState(false);
-
   const requestAccess = async () => {
     setLoading(true);
-    await fetch('/api/auth/request', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceId })
-    });
-    setLoading(false);
-    onRefresh();
+    await fetch('/api/auth/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId }) });
+    setLoading(false); onRefresh();
   };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-app p-4 text-main">
       <div className="w-full max-w-md rounded-2xl border border-line bg-card p-8 text-center shadow-2xl">
-        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-accent/15 text-accent">
+        <div className={`mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full ${status === 'BANNED' ? 'bg-red-500/15 text-red-500' : 'bg-accent/15 text-accent'}`}>
           <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            {status === 'BANNED' ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /> : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />}
           </svg>
         </div>
-        <h1 className="text-xl font-bold">Akses Terkunci</h1>
+        
+        <h1 className="text-xl font-bold">
+          {status === 'BANNED' ? 'Akses Diblokir' : status === 'TIMEOUT' ? 'Akses Ditangguhkan' : 'Akses Terkunci'}
+        </h1>
+        
         <p className="mt-2 text-sm text-muted">
-          Website ini bersifat privat. Kamu harus meminta izin akses dari Admin <strong className="text-main">Hans</strong> terlebih dahulu.
+          {status === 'BANNED' ? 'Kamu telah melanggar aturan dan dilarang mengakses web ini.' :
+           status === 'TIMEOUT' ? `Akses kamu ditangguhkan sementara. Silakan coba lagi setelah: ${timeoutUntil ? new Date(timeoutUntil).toLocaleString('id-ID') : ''}` :
+           status === 'PENDING' ? '⏳ Menunggu Hans (Admin) menyetujui permintaan akses kamu. Halaman ini akan terbuka otomatis jika sudah di-approve.' :
+           'Website ini bersifat privat. Kamu harus meminta izin akses dari Admin Hans terlebih dahulu.'}
         </p>
 
-        {status === 'PENDING' ? (
-          <div className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-500">
-            ⏳ Menunggu persetujuan dari Hans. <br/><span className="text-xs opacity-70 mt-1 block">Halaman ini akan otomatis terbuka jika sudah di-approve.</span>
-          </div>
-        ) : (
-          <button 
-            onClick={requestAccess}
-            disabled={loading}
-            className="mt-6 w-full rounded-xl bg-accent py-3 text-sm font-bold text-accent-text transition hover:bg-accent-hover disabled:opacity-50"
-          >
+        {status === 'UNAUTHORIZED' && (
+          <button onClick={requestAccess} disabled={loading} className="mt-6 w-full rounded-xl bg-accent py-3 text-sm font-bold text-accent-text transition hover:bg-accent-hover disabled:opacity-50">
             {loading ? 'Mengirim permintaan...' : 'Minta Akses Sekarang'}
           </button>
         )}
 
-        <div className="mt-6 text-[10px] text-subtle font-mono">
-          Device ID: {deviceId}
-        </div>
+        <div className="mt-6 text-[10px] text-subtle font-mono bg-hover py-2 rounded-lg">Device ID: {deviceId}</div>
       </div>
     </div>
   );
 }
 
-/* ══════════════ Admin Modal ══════════════ */
-function AdminModal({ open, onClose }: { open: boolean, onClose: () => void }) {
+/* ══════════════ Admin Panel (Full-Screen) ══════════════ */
+function AdminPanel({ open, onClose }: { open: boolean, onClose: () => void }) {
   const [requests, setRequests] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('ALL');
 
   const fetchReqs = useCallback(async () => {
-    setLoading(true);
     const res = await fetch('/api/admin/requests');
     if (res.ok) setRequests(await res.json());
-    setLoading(false);
   }, []);
 
-  useEffect(() => { if (open) fetchReqs(); }, [open, fetchReqs]);
+  useEffect(() => { 
+    if (open) {
+      fetchReqs(); 
+      const int = setInterval(fetchReqs, 5000); 
+      return () => clearInterval(int);
+    } 
+  }, [open, fetchReqs]);
 
-  const updateStatus = async (id: string, status: string) => {
-    await fetch('/api/admin/requests', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, status })
-    });
+  const updateStatus = async (id: string, action: string) => {
+    await fetch('/api/admin/requests', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action }) });
     fetchReqs();
   };
+
+  const filtered = requests.filter(r => {
+    const matchSearch = r.ipAddress.includes(search) || r.deviceId.includes(search);
+    const matchFilter = filter === 'ALL' ? true : r.status === filter;
+    return matchSearch && matchFilter;
+  });
 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-line bg-card shadow-2xl">
-        <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <h2 className="text-lg font-bold">Admin Panel - Hans</h2>
-          <button onClick={onClose} className="text-muted hover:text-main">Tutup</button>
+    <div className="fixed inset-0 z-[100] flex flex-col bg-app">
+      <header className="flex items-center justify-between border-b border-line bg-card px-6 py-4 shadow-sm">
+        <div>
+          <h1 className="text-xl font-bold flex items-center gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-500">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+            </span>
+            Admin Control Center
+          </h1>
+          <p className="text-sm text-muted">Selamat datang, Hans. Kelola akses user dari sini.</p>
         </div>
-        <div className="max-h-[60vh] overflow-y-auto p-5">
-          {requests.length === 0 ? (
-            <div className="text-center text-muted py-8">Tidak ada permintaan akses.</div>
-          ) : (
-            <div className="space-y-3">
-              {requests.map(r => (
-                <div key={r.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl border border-line bg-app p-4">
-                  <div>
-                    <div className="font-semibold text-sm flex items-center gap-2">
-                      IP: {r.ipAddress}
-                      {r.status === 'APPROVED' && <span className="text-[10px] bg-emerald-500/20 text-emerald-500 px-2 py-0.5 rounded">Approved</span>}
-                      {r.status === 'PENDING' && <span className="text-[10px] bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded">Pending</span>}
-                    </div>
-                    <div className="text-[11px] text-subtle font-mono mt-1">ID: {r.deviceId}</div>
-                  </div>
-                  <div className="flex gap-2">
-                    {r.status !== 'APPROVED' && (
-                      <button onClick={() => updateStatus(r.id, 'APPROVED')} className="rounded bg-emerald-500/20 px-3 py-1.5 text-xs font-semibold text-emerald-500 hover:bg-emerald-500/30">Approve</button>
-                    )}
-                    {r.status !== 'REJECTED' && (
-                      <button onClick={() => updateStatus(r.id, 'REJECTED')} className="rounded bg-red-500/20 px-3 py-1.5 text-xs font-semibold text-red-500 hover:bg-red-500/30">Reject</button>
-                    )}
-                  </div>
-                </div>
+        <button onClick={onClose} className="rounded-lg bg-hover px-4 py-2 text-sm font-medium hover:bg-line transition">Tutup Panel</button>
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="mx-auto max-w-6xl space-y-6">
+          
+          {/* Toolbar */}
+          <div className="flex flex-col sm:flex-row justify-between gap-4">
+            <div className="flex gap-2">
+              {['ALL', 'PENDING', 'APPROVED', 'BANNED'].map(f => (
+                <button key={f} onClick={() => setFilter(f)} className={`rounded-lg px-4 py-2 text-sm font-medium transition ${filter === f ? 'bg-accent text-accent-text' : 'bg-card border border-line text-muted hover:text-main'}`}>{f}</button>
               ))}
             </div>
-          )}
+            <div className="relative w-full sm:w-64">
+              <input type="text" placeholder="Cari IP atau Device ID..." value={search} onChange={e => setSearch(e.target.value)} className="w-full rounded-lg border border-line bg-card px-4 py-2 text-sm text-main outline-none focus:border-accent" />
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="rounded-xl border border-line bg-card overflow-hidden">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-hover text-subtle text-xs uppercase">
+                <tr>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">IP Address & Device ID</th>
+                  <th className="px-4 py-3">Terakhir Aktif</th>
+                  <th className="px-4 py-3 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(r => {
+                  const isOnline = new Date(r.lastActive).getTime() > Date.now() - 60000;
+                  return (
+                    <tr key={r.id} className="border-t border-line hover:bg-hover/50 transition">
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-2">
+                          <span className={`h-2.5 w-2.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-line'}`} title={isOnline ? 'Online' : 'Offline'} />
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            r.status === 'APPROVED' ? 'bg-emerald-500/20 text-emerald-500' :
+                            r.status === 'PENDING' ? 'bg-amber-500/20 text-amber-500' :
+                            r.status === 'BANNED' ? 'bg-red-500/20 text-red-500' : 'bg-gray-500/20 text-gray-500'
+                          }`}>{r.status}</span>
+                          {r.timeoutUntil && new Date(r.timeoutUntil) > new Date() && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-500">TIMEOUT</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="font-medium text-main">{r.ipAddress}</div>
+                        <div className="font-mono text-[11px] text-subtle mt-0.5">{r.deviceId}</div>
+                      </td>
+                      <td className="px-4 py-4 text-muted text-xs">
+                        {new Date(r.lastActive).toLocaleString('id-ID')}
+                      </td>
+                      <td className="px-4 py-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {r.status !== 'APPROVED' && <button onClick={() => updateStatus(r.id, 'APPROVE')} className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-2 py-1 rounded text-xs font-medium">Approve</button>}
+                          {r.status === 'APPROVED' && <button onClick={() => updateStatus(r.id, 'REVOKE')} className="bg-hover text-muted hover:text-main px-2 py-1 rounded text-xs font-medium">Revoke</button>}
+                          <div className="h-4 w-px bg-line mx-1" />
+                          <button onClick={() => updateStatus(r.id, 'TIMEOUT_1H')} className="text-orange-500 hover:bg-orange-500/10 px-2 py-1 rounded text-xs font-medium" title="Timeout 1 Jam">1H</button>
+                          <button onClick={() => updateStatus(r.id, 'BAN')} className="text-red-500 hover:bg-red-500/10 px-2 py-1 rounded text-xs font-medium">Ban</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {filtered.length === 0 && <tr><td colSpan={4} className="px-4 py-10 text-center text-subtle">Tidak ada data request.</td></tr>}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -318,7 +298,7 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
   const [compactMode, setCompactMode] = useState(false);
   const [countdown, setCountdown] = useState<{ diffMs: number, target: Date } | null>(null);
 
-  // Load Settings from LocalStorage
+  // Settings Load & Apply
   useEffect(() => {
     const savedTheme = localStorage.getItem('ime-theme') as any;
     if (savedTheme) setTheme(savedTheme);
@@ -335,6 +315,7 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
   useEffect(() => { localStorage.setItem('ime-refresh', String(refreshMs)); }, [refreshMs]);
   useEffect(() => { localStorage.setItem('ime-compact', String(compactMode)); }, [compactMode]);
 
+  // Timer Logic (Restart 06:00 & 18:00 WIB)
   useEffect(() => {
     const updateTimer = () => {
       const now = new Date();
@@ -354,6 +335,7 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
     return () => clearInterval(id);
   }, []);
 
+  // Fetch Players Data
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -377,6 +359,7 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
     return () => clearInterval(id);
   }, [load, refreshMs]);
 
+  // Data Processing
   const enriched = useMemo(() => (data?.players ?? []).map(p => ({ ...p, faction: detectFaction(p.name) })), [data]);
   const counts = useMemo(() => {
     const c: Record<string, number> = { SEMUA: enriched.length };
@@ -413,6 +396,7 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
 
   return (
     <main className="min-h-screen bg-app text-main">
+      {/* ── Floating pill nav ── */}
       <div className="fixed top-3 left-1/2 z-40 w-full max-w-[100vw] -translate-x-1/2 px-3">
         <div className="relative mx-auto max-w-fit">
           <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-8 bg-gradient-to-r from-app to-transparent rounded-l-full" />
@@ -455,8 +439,9 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
             )}
 
             {isAdmin && (
-              <button onClick={onOpenAdmin} className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-500 transition hover:bg-emerald-500/20" title="Admin Panel">
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+              <button onClick={onOpenAdmin} className="flex h-8 items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 text-emerald-500 transition hover:bg-emerald-500/20" title="Admin Panel">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+                <span className="text-xs font-semibold">Admin</span>
               </button>
             )}
 
@@ -484,6 +469,12 @@ function Home({ isAdmin, onOpenSettings, onOpenAdmin }: { isAdmin: boolean, onOp
           <Stat label="Gate" value={data?.gate ?? '—'} accent="text-accent" small />
           <Stat label="Terakhir" value={lastFetch ? lastFetch.toLocaleTimeString('id-ID') : '—'} accent="text-muted" small />
         </section>
+
+        {error && (
+          <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
+            ⚠ {error}
+          </div>
+        )}
 
         <div className="mb-4 flex flex-wrap gap-3">
           <div className="relative min-w-[220px] flex-1">
@@ -563,7 +554,7 @@ function SettingsModal({ open, onClose }: { open: boolean, onClose: () => void }
     localStorage.setItem('ime-compact', String(compactMode));
     document.documentElement.setAttribute('data-theme', theme);
     onClose();
-    window.location.reload(); // Force reload to apply new interval
+    window.location.reload();
   };
 
   if (!open) return null;
@@ -672,7 +663,7 @@ function AIDrawer({ open, onClose, data, enriched, counts, activeCat }: any) {
   );
 }
 
-/* ══════════════ Icons & UI Bits ══════════════ */
+/* ══════════════ UI Bits & Icons ══════════════ */
 function Stat({ label, value, accent, small }: any) {
   return (<div className="rounded-xl border border-line bg-card p-4 shadow-sm"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">{label}</div><div className={`mt-1 truncate font-semibold ${accent} ${small ? 'text-base' : 'text-xl'}`}>{value}</div></div>);
 }
