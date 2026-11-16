@@ -49,8 +49,10 @@ model Faction {
   id        String   @id @default(uuid())
   label     String
   short     String
-  matchType String   // "INCLUDES", "STARTS_WITH"
-  badge     String   // Tailwind classes untuk badge
-  dot       String   // Tailwind classes untuk warna dot
+  matchType String
+  badge     String
+  dot       String
+  side      String?  // <-- TAMBAHKAN INI
+  color     String?  // <-- TAMBAHKAN INI
   createdAt DateTime @default(now())
 }
