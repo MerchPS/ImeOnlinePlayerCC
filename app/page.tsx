@@ -140,17 +140,23 @@ function buildMatchers(factions: FactionDef[]): Matcher[] {
   return list.sort((a, b) => b.alias.length - a.alias.length);
 }
 
+/* Pecah nama jadi kata-kata utuh (dipisah spasi, simbol, atau tanda baca) */
+const nameTokens = (s: string) => s.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+
+/* Pencocokan per KATA, bukan potongan teks:
+   - STARTS_WITH : kata PERTAMA nama harus sama persis dengan alias  ("CC - Vinci", "[CC] Vinci", "CC Vinci")
+   - INCLUDES    : salah satu kata nama harus sama persis dengan alias
+   Jadi "VINCI CCHITTO", "Dwi", "Sinta", atau "Hendra" tidak lagi salah masuk CC / DW / SIN / HT.
+   Jika nama memakai pemisah " - ", yang dicek hanya bagian sebelum pemisah (tag faction). */
 function detectFaction(name: string, matchers: Matcher[]): string {
-  const hasSep = name.includes(' - ');
-  const cleanPrefix = clean(name.split(' - ')[0].trim());
-  const cleanFull = clean(name);
+  const scope = name.includes(' - ') ? name.split(' - ')[0] : name;
+  const toks = nameTokens(scope);
+  if (toks.length === 0) return 'WARGA';
   for (const m of matchers) {
     if (m.type === 'STARTS_WITH') {
-      if (cleanPrefix.startsWith(m.alias)) return m.id;
-      if (!hasSep && cleanFull.startsWith(m.alias)) return m.id;
+      if (toks[0] === m.alias) return m.id;
     } else if (m.type === 'INCLUDES') {
-      if (cleanPrefix.includes(m.alias)) return m.id;
-      if (!hasSep && cleanFull.includes(m.alias)) return m.id;
+      if (toks.includes(m.alias)) return m.id;
     }
   }
   return 'WARGA';
