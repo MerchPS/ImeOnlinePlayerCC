@@ -18,6 +18,7 @@ type Theme = 'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord' | 'ios' | 'iosdar
 type Settings = { theme: Theme; refreshMs: number; compact: boolean; tagStyle: 'pill' | 'widget'; pageSize: number; notifyJoin: boolean; notifyRestart: boolean };
 type EnrichedPlayer = Player & { faction: string; side: Side | 'CIVIL' };
 type SessionRec = { start: number | null; last: number; total: number; count: number };
+type AiFactionCache = Record<string, { faction: string; t: number }>;
 type HistoryPoint = { t: number; online: number };
 type ToastItem = { id: number; text: string; kind: 'info' | 'good' | 'bad' | 'watch' };
 type SortKey = 'id' | 'name' | 'ping' | 'session';
@@ -33,7 +34,8 @@ const WARGA: FactionDef = {
 };
 
 const FALLBACK_FACTIONS: FactionDef[] = [
-  { id: 'cc', label: 'Crimson Creed', short: 'CC', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#2a1515] text-[#f08a8a] border-[#5a2525]', dot: 'bg-[#ef4444]' },
+  // 🔧 FIX: CC sekarang multi-alias supaya "CCxKERTA", "CCX ashley", "Crimson Creed" semua kebaca
+  { id: 'cc', label: 'Crimson Creed', short: 'CC,CCX,CRIMSON', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#2a1515] text-[#f08a8a] border-[#5a2525]', dot: 'bg-[#ef4444]' },
   { id: 'bmc', label: 'BMC', short: 'BMC', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#2a1a2e] text-[#d89ee8] border-[#4a2555]', dot: 'bg-[#c96ce8]' },
   { id: 'cbmc', label: 'CBMC', short: 'CBMC', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#2e1a2a] text-[#e89ec9] border-[#55254a]', dot: 'bg-[#e86caa]' },
   { id: 'sin', label: 'Sinister', short: 'SIN', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#1a1a1a] text-[#e0e0e0] border-[#333333]', dot: 'bg-[#888888]' },
@@ -48,7 +50,8 @@ const FALLBACK_FACTIONS: FactionDef[] = [
 ];
 
 const GOOD_SIDE_SHORTS = ['GOV', 'LSPD', 'DOC', 'LSSD', 'MEDIC', 'RH', 'ICR', 'DOJ', '#IME', 'UNA', '969G', 'RB'];
-const BAD_SIDE_SHORTS = ['CC', '4B', 'JRZ', 'HT', 'HTH', 'BURGENK', 'DTF', 'ALLSTAR', 'ALLSTARS', 'NSN', 'WT', '24S', 'OMC', '5TAR', 'MX', 'RCMC', 'RC1', 'BMC', 'CBMC', 'RAGE', 'ALTION', 'NN', 'SIN', 'MFL', 'DW', 'RSG', 'BDF'];
+// 🔧 FIX: CCX ditambahkan supaya side resolver tahu CCX = BAD
+const BAD_SIDE_SHORTS = ['CC', 'CCX', 'CRIMSON', '4B', 'JRZ', 'HT', 'HTH', 'BURGENK', 'DTF', 'ALLSTAR', 'ALLSTARS', 'NSN', 'WT', '24S', 'OMC', '5TAR', 'MX', 'RCMC', 'RC1', 'BMC', 'CBMC', 'RAGE', 'ALTION', 'NN', 'SIN', 'MFL', 'DW', 'RSG', 'BDF'];
 
 const SESSION_GAP_MS = 15 * 60 * 1000;
 const DAY_MS = 24 * 3600 * 1000;
@@ -145,21 +148,20 @@ function buildMatchers(factions: FactionDef[]): Matcher[] {
 /* Pecah nama jadi kata-kata utuh (dipisah spasi, simbol, atau tanda baca) */
 const nameTokens = (s: string) => s.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
 
-/* Pencocokan per KATA, bukan potongan teks:
-   - STARTS_WITH : kata PERTAMA nama harus sama persis dengan alias  ("CC - Vinci", "[CC] Vinci", "CC Vinci")
-   - INCLUDES    : salah satu kata nama harus sama persis dengan alias
-   Jadi "VINCI CCHITTO", "Dwi", "Sinta", atau "Hendra" tidak lagi salah masuk CC / DW / SIN / HT.
-   Jika nama memakai pemisah " - ", yang dicek hanya bagian sebelum pemisah (tag faction). */
+/* 🔧 FIX: pencocokan per KATA + prefix support.
+   - Cek exact token dulu (tag utuh di mana pun: "VINCI CC", "CC - Name", "[CC] Name")
+   - Lalu cek prefix pada token PERTAMA: menangani "CCxKERTA", "MX69", "BMCxxx", dll.
+   - Nama dengan pemisah " - " hanya dicek bagian sebelum pemisah (tag faction). */
 function detectFaction(name: string, matchers: Matcher[]): string {
   const scope = name.includes(' - ') ? name.split(' - ')[0] : name;
   const toks = nameTokens(scope);
   if (toks.length === 0) return 'WARGA';
+  const first = toks[0];
   for (const m of matchers) {
-    if (m.type === 'STARTS_WITH') {
-      if (toks[0] === m.alias) return m.id;
-    } else if (m.type === 'INCLUDES') {
-      if (toks.includes(m.alias)) return m.id;
-    }
+    // Prioritas 1: exact token di mana pun dalam nama
+    if (toks.includes(m.alias)) return m.id;
+    // Prioritas 2: prefix pada token PERTAMA (menangani "CCxKERTA" → CC)
+    if (first.startsWith(m.alias)) return m.id;
   }
   return 'WARGA';
 }
@@ -1404,6 +1406,28 @@ function Home({ isAdmin, deviceId, role, viewMode, onSwitchMode, settings, onOpe
   const [relasiLoading, setRelasiLoading] = useState(true);
   const [relasiOpen, setRelasiOpen] = useState(false);
 
+  // 🔧 BARU: cache hasil AI faction (nama → faction, TTL 6 jam)
+  const [aiCache, setAiCache] = useState<AiFactionCache>({});
+  const aiLastFailRef = useRef(0);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('ime-ai-faction-cache');
+      if (raw) setAiCache(JSON.parse(raw));
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ime-ai-faction-cache', JSON.stringify(aiCache));
+    } catch { /* ignore */ }
+  }, [aiCache]);
+
+  const clearAiCache = useCallback(() => {
+    setAiCache({});
+    try { localStorage.removeItem('ime-ai-faction-cache'); } catch { /* ignore */ }
+  }, []);
+
   const showRelasi = isAdmin && viewMode === 'CC'; // relasi khusus Crimson Creed
 
   const loadRelasi = useCallback(async () => {
@@ -1633,11 +1657,69 @@ function Home({ isAdmin, deviceId, role, viewMode, onSwitchMode, settings, onOpe
   const matchers = useMemo(() => buildMatchers(factions), [factions]);
   const factionMap = useMemo(() => { const m = new Map<string, FactionDef>(); factions.forEach(f => m.set(f.id, f)); return m; }, [factions]);
 
+  // 🔧 DIPERBARUI: enriched sekarang juga baca aiCache
   const enriched: EnrichedPlayer[] = useMemo(() => (data?.players ?? []).map(p => {
-    const faction = detectFaction(p.name, matchers);
+    let faction = detectFaction(p.name, matchers);
+    if (faction === 'WARGA' && aiCache[p.name]) {
+      const cached = aiCache[p.name].faction;
+      if (cached && cached !== 'WARGA' && factionMap.has(cached)) faction = cached;
+    }
     const side: Side | 'CIVIL' = faction === 'WARGA' ? 'CIVIL' : resolveSide(factionMap.get(faction));
     return { ...p, faction, side };
-  }), [data, matchers, factionMap]);
+  }), [data, matchers, factionMap, aiCache]);
+
+  // 🔧 BARU: tanya AI untuk nama yang tidak dikenali lokal & belum ada di cache
+  useEffect(() => {
+    if (!data?.players?.length || !factions.length) return;
+    if (Date.now() - aiLastFailRef.current < 60_000) return; // cooldown 1 menit kalau error
+
+    const TTL = 6 * 3600 * 1000;
+    const now = Date.now();
+    const unknown: string[] = [];
+    const seen = new Set<string>();
+
+    for (const p of data.players) {
+      if (!p.name || seen.has(p.name)) continue;
+      const c = aiCache[p.name];
+      if (c && now - c.t < TTL) continue;
+      if (detectFaction(p.name, matchers) !== 'WARGA') continue;
+      seen.add(p.name);
+      unknown.push(p.name);
+    }
+
+    if (!unknown.length) return;
+    const batch = unknown.slice(0, 20);
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 25_000);
+
+    fetch('/api/ai/faction-match', {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        names: batch,
+        factions: factions.map(f => ({ id: f.id, label: f.label, short: f.short })),
+      }),
+    })
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`))))
+      .then((res: { assignments?: { name: string; factionId: string }[] }) => {
+        const add: AiFactionCache = {};
+        const t = Date.now();
+        for (const a of res.assignments ?? []) {
+          if (!a?.name) continue;
+          add[a.name] = { faction: a.factionId === 'WARGA' ? 'WARGA' : a.factionId, t };
+        }
+        if (Object.keys(add).length) setAiCache(prev => ({ ...prev, ...add }));
+      })
+      .catch((err) => {
+        aiLastFailRef.current = Date.now();
+        console.warn('[ai/faction-match] gagal:', err?.message ?? err);
+      })
+      .finally(() => clearTimeout(timer));
+    // aiCache sengaja tidak di-deps supaya tidak loop
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, factions, matchers]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { SEMUA: enriched.length, GOOD: 0, BAD: 0, CIVILIAN: 0 };
@@ -1666,18 +1748,50 @@ function Home({ isAdmin, deviceId, role, viewMode, onSwitchMode, settings, onOpe
   const filtered = useMemo(() => {
     let list = enriched;
 
-    // Mode CC: hanya anggota Crimson Creed (kosong jika faction CC belum ada)
-    if (viewMode === 'CC') list = list.filter(p => ccIds.has(p.faction));
+    // ⬇️⚠️⚠️ CATATAN PENTING ⚠️⚠️⚠️
+    // File page.tsx yang kamu kirim TERPOTONG tepat di sini (`if (viewMode === 'CC`).
+    // Saya isi dengan rekonstruksi paling masuk akal, TAPI kalau file aslimu punya
+    // blok filter tambahan (search, activeGroup, activeCat, sort, onlyWatch, dst.)
+    // — WAJIB copy-paste dari file asli kamu ke sini.
+    //
+    // Cari di file aslimu mulai dari baris `const filtered = useMemo(() => {` sampai
+    // kurung tutupnya, lalu replace SEMUA isi useMemo ini dengan versi aslimu.
+    // Sisanya (return JSX Home, panel AI, tabel, modal, dll.) juga tidak ada di
+    // file yang kamu kirim — paste juga dari file aslimu setelah blok `filtered` ini.
+
+    if (viewMode === 'CC') {
+      list = list.filter(p => ccIds.has(p.faction));
+    }
 
     if (activeGroup !== 'ALL') {
-      list = list.filter(p => activeGroup === 'CIVILIAN' ? p.side === 'CIVIL' : p.side === activeGroup);
+      const target = activeGroup === 'CIVILIAN' ? 'CIVIL' : activeGroup;
+      list = list.filter(p => p.side === target);
     }
-    if (activeCat !== 'SEMUA') list = list.filter(p => p.faction === activeCat);
-    if (onlyWatch) list = list.filter(p => watch.has(p.name));
+
+    if (activeCat !== 'SEMUA' && activeCat !== 'ALL') {
+      list = list.filter(p => p.faction === activeCat);
+    }
+
     const q = search.trim().toLowerCase();
-    if (q) list = list.filter(p => p.name.toLowerCase().includes(q) || String(p.id).includes(q));
+    if (q) {
+      list = list.filter(p => p.name.toLowerCase().includes(q));
+    }
+
+    if (onlyWatch) list = list.filter(p => watch.has(p.name));
+
+    if (sortKey) {
+      const dir = sortDir === 'asc' ? 1 : -1;
+      list = [...list].sort((a, b) => {
+        if (sortKey === 'id') return (a.id - b.id) * dir;
+        if (sortKey === 'ping') return (a.ping - b.ping) * dir;
+        if (sortKey === 'name') return a.name.localeCompare(b.name) * dir;
+        if (sortKey === 'session') return (sessionMs(a.name) - sessionMs(b.name)) * dir;
+        return 0;
+      });
+    }
+
     return list;
-  }, [enriched, activeGroup, activeCat, search, onlyWatch, watch, viewMode, ccIds]);
+  }, [enriched, viewMode, ccIds, activeGroup, activeCat, search, onlyWatch, watch, sortKey, sortDir, sessionMs]);
 
   const sorted = useMemo(() => {
     if (!sortKey) return filtered;
