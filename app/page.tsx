@@ -22,6 +22,8 @@ type HistoryPoint = { t: number; online: number };
 type ToastItem = { id: number; text: string; kind: 'info' | 'good' | 'bad' | 'watch' };
 type SortKey = 'id' | 'name' | 'ping' | 'session';
 type GroupId = 'ALL' | 'GOOD' | 'BAD' | 'CIVILIAN';
+type Relasi = { id: string; citizenId: string; firstName: string; lastName: string; dob: string | null; sex: string | null; nationality: string | null; rank: string | null; relation: string | null; notes: string | null; active: boolean; createdBy: string; createdAt: string; updatedAt: string };
+type RelasiForm = { id?: string; citizenId: string; firstName: string; lastName: string; dob: string; sex: string; nationality: string; rank: string; relation: string; notes: string; active: boolean };
 
 const DEFAULT_SETTINGS: Settings = { theme: 'dark', refreshMs: 60000, compact: false, tagStyle: 'widget', pageSize: 25, notifyJoin: true, notifyRestart: false };
 
@@ -160,6 +162,17 @@ function detectFaction(name: string, matchers: Matcher[]): string {
     }
   }
   return 'WARGA';
+}
+
+/* Relasi dianggap online jika SEMUA kata nama depan + belakang ada di nama player */
+function findRelasiPlayer(r: { firstName: string; lastName: string }, players: EnrichedPlayer[]): EnrichedPlayer | null {
+  const need = [...nameTokens(r.firstName), ...nameTokens(r.lastName)];
+  if (need.length === 0) return null;
+  for (const p of players) {
+    const have = new Set(nameTokens(p.name));
+    if (need.every(t => have.has(t))) return p;
+  }
+  return null;
 }
 
 function resolveSide(f?: FactionDef): Side {
@@ -311,6 +324,7 @@ export default function App() {
         <div key={viewMode ?? 'x'} className="ios-enter">
           <Home
             isAdmin={authStatus === 'ADMIN'}
+            deviceId={deviceId}
             role={role}
             viewMode={viewMode || 'ALL'}
             onSwitchMode={() => setViewMode(null)}
@@ -407,6 +421,20 @@ const MS_CSS = `
 @keyframes ms-fadein { from { opacity: 0; } }
 .ms-badge { position: absolute; top: 16px; right: 16px; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 9999px; font-size: 11px; font-weight: 600; color: rgb(var(--tint)); background: rgba(var(--tint), .14); border: 1px solid rgba(var(--tint), .35); animation: ms-drop .6s ease .9s backwards; }
 .ms-badge i { width: 6px; height: 6px; border-radius: 9999px; background: rgb(var(--tint)); animation: ms-blink 1.6s ease-in-out infinite; }
+.ms-load { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; overflow: hidden; color: #fff; text-align: center;
+  background: radial-gradient(ellipse at center, rgba(var(--tint), .30), rgba(5,6,10,.97) 62%), #05060a; animation: ms-fadein .5s ease backwards; }
+.ms-scan { position: absolute; left: 0; right: 0; top: -140px; height: 140px; pointer-events: none; background: linear-gradient(180deg, transparent, rgba(var(--tint), .2), transparent); animation: ms-scanline 2.8s linear infinite; }
+@keyframes ms-scanline { to { transform: translateY(calc(100vh + 140px)); } }
+.ms-ring { position: relative; width: 168px; height: 168px; animation: ms-rise .7s cubic-bezier(.2,.8,.2,1) backwards; }
+.ms-ring svg { transform: rotate(-90deg); }
+.ms-ring-track { stroke: rgba(255,255,255,.08); }
+.ms-ring-bar { stroke: rgb(var(--tint)); stroke-linecap: round; filter: drop-shadow(0 0 8px rgba(var(--tint), .9)); transition: stroke-dashoffset .25s linear; }
+.ms-orbit { position: absolute; inset: -16px; border-radius: 9999px; border: 1px dashed rgba(var(--tint), .35); animation: ms-orbit 8s linear infinite; }
+.ms-orbit::after { content: ''; position: absolute; top: -4px; left: 50%; width: 8px; height: 8px; margin-left: -4px; border-radius: 9999px; background: rgb(var(--tint)); box-shadow: 0 0 14px rgb(var(--tint)); }
+@keyframes ms-orbit { to { transform: rotate(360deg); } }
+.ms-pct { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; font-variant-numeric: tabular-nums; }
+.ms-step { min-height: 20px; font-size: 13px; color: rgba(255,255,255,.65); animation: ms-stepin .35s ease; }
+@keyframes ms-stepin { from { opacity: 0; transform: translateY(6px); } }
 @media (prefers-reduced-motion: reduce) { .ms-root *, .ms-root *::before { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
 `;
 
@@ -448,10 +476,22 @@ function ModeCard({ title, desc, tint, tilt, delay, icon, badge, state, onPick }
   );
 }
 
+const MS_STEPS: Record<Mode, string[]> = {
+  CC: ['Menyambungkan ke server…', 'Menyinkronkan data faction…', 'Memuat anggota Crimson Creed…', 'Menyiapkan panel relasi…'],
+  ALL: ['Menyambungkan ke server…', 'Menyinkronkan data faction…', 'Memuat seluruh player…', 'Menyiapkan dashboard…'],
+};
+const RING_C = 2 * Math.PI * 76;
+
 function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: Mode) => void }) {
   const [picked, setPicked] = useState<{ mode: Mode; x: number; y: number } | null>(null);
+  const [phase, setPhase] = useState<'idle' | 'ripple' | 'loading'>('idle');
+  const [pct, setPct] = useState(0);
   const [gifOk, setGifOk] = useState(true);
   const [stats, setStats] = useState<{ all: number; cc: number } | null>(null);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const poll = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => () => { timers.current.forEach(clearTimeout); if (poll.current) clearInterval(poll.current); }, []);
 
   // Jumlah online langsung di kartu (pakai aturan deteksi faction yang sama dengan dashboard)
   useEffect(() => {
@@ -479,9 +519,35 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
     let x = e.clientX, y = e.clientY;
     if (!x && !y) { const r = e.currentTarget.getBoundingClientRect(); x = r.left + r.width / 2; y = r.top + r.height / 2; } // dipicu keyboard
     setPicked({ mode, x, y });
-    setTimeout(() => onSelect(mode), 850);
+    setPhase('ripple');
+
+    const reduce = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const MIN = reduce ? 700 : 2400;
+    timers.current.push(setTimeout(() => setPhase('loading'), reduce ? 0 : 800));
+
+    // Loading sungguhan: ikut menunggu data player + faction (maks 5 detik), minimal MIN ms agar animasi tidak berkedip
+    const t0 = Date.now();
+    let ready = false;
+    Promise.race([
+      Promise.allSettled([fetch('/api/players', { cache: 'no-store' }), fetch('/api/factions')]),
+      new Promise(r => setTimeout(r, 5000)),
+    ]).then(() => { ready = true; });
+
+    poll.current = setInterval(() => {
+      const t = Date.now() - t0;
+      const finished = ready && t >= MIN;
+      const target = finished ? 100 : Math.min(92, (t / MIN) * 92);
+      setPct(prev => Math.max(prev, Math.round(target)));
+      if (finished) {
+        if (poll.current) clearInterval(poll.current);
+        timers.current.push(setTimeout(() => onSelect(mode), 450));
+      }
+    }, 60);
   };
   const stateOf = (m: Mode): 'idle' | 'picked' | 'dim' => (!picked ? 'idle' : picked.mode === m ? 'picked' : 'dim');
+
+  const steps = picked ? MS_STEPS[picked.mode] : MS_STEPS.ALL;
+  const stepIdx = Math.min(steps.length - 1, Math.floor(pct / (100 / steps.length)));
 
   return (
     <div className="ms-root relative flex min-h-screen items-center justify-center overflow-hidden bg-[#05060a] p-4 font-sans" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
@@ -520,7 +586,7 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
 
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-6">
           <ModeCard
-            title="Crimson Creed Only" desc="Fokus memantau dan menganalisis anggota Crimson Creed saja."
+            title="Crimson Creed Only" desc="Fokus memantau anggota dan relasi Crimson Creed."
             tint="239,68,68" tilt="-6deg" delay=".25s" state={stateOf('CC')} onPick={e => choose('CC', e)}
             badge={stats ? `${stats.cc} online` : undefined}
             icon="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
@@ -535,6 +601,31 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
       </div>
 
       {picked && <div className="ms-ripple" style={{ left: picked.x, top: picked.y, background: picked.mode === 'CC' ? '#ef4444' : '#3b82f6' }} />}
+
+      {phase === 'loading' && picked && (
+        <div className="ms-load" style={{ ['--tint' as string]: picked.mode === 'CC' ? '239,68,68' : '59,130,246' }}>
+          {gifOk && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={IME_GIF} alt="" aria-hidden draggable={false} className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover opacity-20 blur-sm" />
+          )}
+          <div className="ms-scan" />
+          <div className="ms-ring">
+            <div className="ms-orbit" />
+            <svg width="168" height="168" viewBox="0 0 168 168">
+              <circle className="ms-ring-track" cx="84" cy="84" r="76" fill="none" strokeWidth="6" />
+              <circle className="ms-ring-bar" cx="84" cy="84" r="76" fill="none" strokeWidth="6" strokeDasharray={RING_C} strokeDashoffset={RING_C * (1 - pct / 100)} />
+            </svg>
+            <div className="ms-pct">
+              <span className="text-4xl font-bold">{pct}<span className="text-lg text-white/50">%</span></span>
+              <span className="text-[10px] uppercase tracking-[0.25em] text-white/40">memuat</span>
+            </div>
+          </div>
+          <div className="relative">
+            <div className="text-2xl font-bold tracking-tight" style={{ textShadow: `0 0 30px rgba(${picked.mode === 'CC' ? '239,68,68' : '59,130,246'},.7)` }}>{picked.mode === 'CC' ? 'Crimson Creed' : 'All Factions'}</div>
+            <div key={stepIdx} className="ms-step mt-2">{steps[stepIdx]}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1213,7 +1304,7 @@ const GROUP_WIDGETS: { id: Exclude<GroupId, 'ALL'>; label: string; icon: string;
 ];
 
 /* ══════════════ Main Home ══════════════ */
-function Home({ isAdmin, role, viewMode, onSwitchMode, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boolean; role: Role; viewMode: 'ALL' | 'CC'; onSwitchMode: () => void; settings: Settings; onOpenSettings: () => void; onOpenAdmin: () => void }) {
+function Home({ isAdmin, deviceId, role, viewMode, onSwitchMode, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boolean; deviceId: string; role: Role; viewMode: 'ALL' | 'CC'; onSwitchMode: () => void; settings: Settings; onOpenSettings: () => void; onOpenAdmin: () => void }) {
   const { refreshMs, compact: compactMode, tagStyle } = settings;
   const infinite = settings.pageSize === 0;
   const pageSize = settings.pageSize || 25;
@@ -1238,6 +1329,24 @@ function Home({ isAdmin, role, viewMode, onSwitchMode, settings, onOpenSettings,
   const [delta, setDelta] = useState<number | null>(null);
   const [pull, setPull] = useState(0);
   const [urlReady, setUrlReady] = useState(false);
+  const [relasi, setRelasi] = useState<Relasi[]>([]);
+  const [relasiLoading, setRelasiLoading] = useState(true);
+  const [relasiOpen, setRelasiOpen] = useState(false);
+
+  const loadRelasi = useCallback(async () => {
+    if (!isAdmin || !deviceId) return;
+    try {
+      const res = await fetch('/api/relasi', { headers: staffHeaders(deviceId, false), cache: 'no-store' });
+      if (res.ok) setRelasi(await res.json());
+    } catch { /* abaikan */ } finally { setRelasiLoading(false); }
+  }, [isAdmin, deviceId]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    loadRelasi();
+    const id = setInterval(loadRelasi, 30000);
+    return () => clearInterval(id);
+  }, [isAdmin, loadRelasi]);
 
   const [factions, setFactions] = useState<FactionDef[]>(FALLBACK_FACTIONS);
   const [factionsError, setFactionsError] = useState(false);
@@ -1557,6 +1666,12 @@ function Home({ isAdmin, role, viewMode, onSwitchMode, settings, onOpenSettings,
   // Hitungan nav di mode CC harus mengikuti jumlah anggota CC, bukan semua player
   const ccMembers = useMemo(() => enriched.filter(p => ccIds.has(p.faction)), [enriched, ccIds]);
   const ccCount = ccMembers.length;
+
+  const relasiOnline = useMemo(() => {
+    const m = new Map<string, EnrichedPlayer>();
+    for (const r of relasi) { const pl = findRelasiPlayer(r, enriched); if (pl) m.set(r.id, pl); }
+    return m;
+  }, [relasi, enriched]);
   const navCount = (id: string) => (viewMode === 'CC' ? ccCount : counts[id] ?? 0);
 
   const isWarning = countdown && countdown.diffMs < 30 * 60 * 1000;
@@ -1667,6 +1782,12 @@ function Home({ isAdmin, role, viewMode, onSwitchMode, settings, onOpenSettings,
                 {pendingCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white border-2 border-app">{pendingCount}</span>}
               </button>
             )}
+            {isAdmin && (
+              <button onClick={() => setRelasiOpen(true)} className="flex h-8 items-center gap-2 rounded-full border border-red-500/30 bg-card px-3 text-red-400 transition hover:bg-red-500/10" title="Data relasi">
+                <UsersIcon className="h-4 w-4" /><span className="text-xs font-semibold">Relasi</span>
+                {relasi.length > 0 && <span className="rounded-full bg-red-500/20 px-1.5 text-[10px] font-bold">{relasi.length}</span>}
+              </button>
+            )}
             <button onClick={() => setHistoryOpen(true)} className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-card text-muted transition hover:border-accent/50 hover:text-main" title="Riwayat sesi"><ClockIcon className="h-4 w-4" /></button>
             <button onClick={onOpenSettings} className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-card text-muted transition-all duration-300 hover:border-accent/50 hover:text-main hover:rotate-90" title="Pengaturan"><GearIcon className="h-4 w-4" /></button>
             <button onClick={() => setAiOpen(true)} className="group flex items-center gap-2 rounded-full border border-line bg-card px-4 py-1.5 text-xs font-medium text-accent transition hover:border-accent/50 hover:bg-hover"><SparkIcon className="h-3.5 w-3.5" />Tanya AI</button>
@@ -1685,6 +1806,7 @@ function Home({ isAdmin, role, viewMode, onSwitchMode, settings, onOpenSettings,
         )}
 
         {viewMode === 'CC' && <CCPanel members={ccMembers} sessionMs={sessionMs} watch={watch} missing={ccIds.size === 0} />}
+        {viewMode === 'CC' && isAdmin && !relasiLoading && <RelasiMonitor items={relasi} onlineMap={relasiOnline} onOpen={() => setRelasiOpen(true)} />}
 
         <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat label="Online" value={data ? fmt(data.online) : '—'} accent="text-emerald-500" pulse delta={delta} />
@@ -1817,6 +1939,7 @@ function Home({ isAdmin, role, viewMode, onSwitchMode, settings, onOpenSettings,
         </div>
       </div>
 
+      {isAdmin && <RelasiPanel open={relasiOpen} onClose={() => setRelasiOpen(false)} deviceId={deviceId} items={relasi} loading={relasiLoading} onReload={loadRelasi} onlineMap={relasiOnline} notify={pushToast} />}
       <HistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} sessions={sessionsRef.current} onlineNames={prevNamesRef.current} watch={watch} onToggleWatch={toggleWatch} />
       <AIDrawer open={aiOpen} onClose={() => setAiOpen(false)} data={data} enriched={enriched} counts={counts} activeCat={activeCat} factionMap={factionMap} />
     </main>
@@ -2083,6 +2206,8 @@ type IconProps = { className?: string };
 const mkIcon = (paths: string[]) => function Icon({ className }: IconProps) {
   return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">{paths.map((d, i) => <path key={i} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={d} />)}</svg>;
 };
+const UsersIcon = mkIcon(['M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z']);
+const ScanIcon = mkIcon(['M4 8V6a2 2 0 012-2h2M4 16v2a2 2 0 002 2h2m8-16h2a2 2 0 012 2v2m-4 12h2a2 2 0 002-2v-2M8 12h8']);
 const BugIcon = mkIcon(['M8 9a4 4 0 118 0v6a4 4 0 01-8 0V9zm-4 2h4m8 0h4M4 17h4m8 0h4M9 5L7 3m8 2l2-2']);
 const SparkIcon = mkIcon(['M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z']);
 const ClockIcon = mkIcon(['M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z']);
@@ -2151,5 +2276,328 @@ function CCPanel({ members, sessionMs, watch, missing }: { members: EnrichedPlay
         )}
       </div>
     </section>
+  );
+}
+
+/* ══════════════ Relasi Crimson Creed ══════════════ */
+const FIELD = 'w-full rounded-xl border border-line bg-app px-3 py-2.5 text-sm text-main outline-none transition focus:border-accent';
+const LABEL = 'mb-1 block text-[11px] font-semibold text-muted';
+const EMPTY_RELASI: RelasiForm = { citizenId: '', firstName: '', lastName: '', dob: '', sex: '', nationality: '', rank: '', relation: '', notes: '', active: true };
+
+const staffHeaders = (deviceId: string, json = true): HeadersInit => ({ ...(json ? { 'Content-Type': 'application/json' } : {}), 'x-device-id': deviceId });
+const fullName = (r: { firstName: string; lastName: string }) => `${r.firstName} ${r.lastName}`.trim();
+const toForm = (r: Relasi): RelasiForm => ({ id: r.id, citizenId: r.citizenId, firstName: r.firstName, lastName: r.lastName, dob: r.dob ?? '', sex: r.sex ?? '', nationality: r.nationality ?? '', rank: r.rank ?? '', relation: r.relation ?? '', notes: r.notes ?? '', active: r.active });
+
+/* Perkecil screenshot di browser sebelum dikirim (hemat bandwidth, lebih cepat dibaca) */
+async function imageToJpeg(file: Blob, maxW = 1400): Promise<{ data: string; preview: string }> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('File bukan gambar yang valid')); i.src = url; });
+    const scale = Math.min(1, maxW / img.width);
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.width * scale)); c.height = Math.max(1, Math.round(img.height * scale));
+    c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+    const dataUrl = c.toDataURL('image/jpeg', 0.85);
+    return { data: dataUrl.split(',')[1], preview: dataUrl };
+  } finally { URL.revokeObjectURL(url); }
+}
+
+/* ── Monitoring relasi di dashboard mode CC ── */
+function RelasiMonitor({ items, onlineMap, onOpen }: { items: Relasi[]; onlineMap: Map<string, EnrichedPlayer>; onOpen: () => void }) {
+  const rows = items.filter(r => r.active)
+    .map(r => ({ r, p: onlineMap.get(r.id) ?? null }))
+    .sort((a, b) => Number(!!b.p) - Number(!!a.p) || fullName(a.r).localeCompare(fullName(b.r), 'id'));
+  const online = rows.filter(x => x.p).length;
+  const inactive = items.length - rows.length;
+  const shown = rows.slice(0, 10);
+  return (
+    <section className="ios-enter mb-6 rounded-2xl border border-line bg-card p-4 sm:p-5">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/15 text-red-400"><UsersIcon className="h-5 w-5" /></span>
+          <div>
+            <div className="text-sm font-semibold text-main">Relasi Crimson Creed</div>
+            <div className="text-[11px] text-muted">{rows.length} aktif · <span className="text-emerald-500">{online} online</span>{inactive > 0 ? ` · ${inactive} nonaktif` : ''}</div>
+          </div>
+        </div>
+        <button onClick={onOpen} className="rounded-full border border-line bg-hover px-3 py-1.5 text-xs font-medium text-main transition hover:border-accent/50">Kelola</button>
+      </div>
+      {rows.length === 0 ? (
+        <div className="rounded-xl bg-hover/50 py-6 text-center text-xs text-subtle">Belum ada relasi aktif. Klik <b>Kelola</b> lalu <b>Tambah Relasi</b>.</div>
+      ) : (
+        <div className="space-y-1.5">
+          {shown.map(({ r, p }) => (
+            <div key={r.id} className="flex items-center gap-3 rounded-xl bg-hover/50 px-3 py-2">
+              <span className={`h-2 w-2 shrink-0 rounded-full ${p ? 'animate-pulse bg-emerald-500' : 'bg-line'}`} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-medium text-main">{fullName(r)}</div>
+                <div className="truncate text-[11px] text-muted">{[r.rank, r.relation].filter(Boolean).join(' · ') || r.citizenId}</div>
+              </div>
+              {p ? <span className={`shrink-0 rounded border px-2 py-0.5 font-mono text-[11px] ${pingClass(p.ping)}`}>{p.ping}</span> : <span className="shrink-0 text-[11px] text-subtle">Offline</span>}
+            </div>
+          ))}
+          {rows.length > shown.length && <button onClick={onOpen} className="w-full rounded-xl py-2 text-xs text-muted hover:text-main">+{rows.length - shown.length} relasi lainnya</button>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ── Form tambah / edit relasi (+ scan KTP otomatis) ── */
+function RelasiFormSheet({ open, initial, deviceId, items, onClose, onSaved, notify }: {
+  open: boolean; initial: RelasiForm | null; deviceId: string; items: Relasi[]; onClose: () => void; onSaved: () => void; notify: (t: string, k?: ToastItem['kind']) => void;
+}) {
+  const [f, setF] = useState<RelasiForm>(EMPTY_RELASI);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const [scan, setScan] = useState<'idle' | 'scanning' | 'done' | 'error'>('idle');
+  const [scanMsg, setScanMsg] = useState('');
+  const [preview, setPreview] = useState<string | null>(null);
+  const [drag, setDrag] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setF(initial ?? EMPTY_RELASI); setErr(''); setScan('idle'); setScanMsg(''); setPreview(null);
+  }, [open, initial]);
+
+  const set = <K extends keyof RelasiForm>(k: K, v: RelasiForm[K]) => setF(p => ({ ...p, [k]: v }));
+
+  const scanFile = useCallback(async (file: Blob) => {
+    setScan('scanning'); setScanMsg(''); setErr('');
+    try {
+      const { data, preview: pv } = await imageToJpeg(file);
+      setPreview(pv);
+      const res = await fetch('/api/relasi/scan', { method: 'POST', headers: staffHeaders(deviceId), body: JSON.stringify({ image: data, mime: 'image/jpeg' }) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Gagal membaca KTP');
+      const d = (json.data ?? {}) as Record<string, unknown>;
+      const patch: Partial<RelasiForm> = {};
+      (['firstName', 'lastName', 'citizenId', 'dob', 'sex', 'nationality', 'rank'] as const).forEach(k => {
+        const v = d[k];
+        if (typeof v === 'string' && v.trim()) patch[k] = v.trim();
+      });
+      const found = patch.citizenId ? items.find(i => i.citizenId === patch.citizenId) : undefined;
+      setF(prev => (found && !prev.id ? { ...toForm(found), ...patch } : { ...prev, ...patch }));
+      setScan('done');
+      setScanMsg(found ? 'Citizen ID sudah terdaftar, form dibuka dalam mode edit.' : 'Terisi otomatis. Periksa kembali sebelum menyimpan.');
+    } catch (e: any) {
+      setScan('error'); setScanMsg(e?.message || 'Gagal membaca KTP');
+    }
+  }, [deviceId, items]);
+
+  // Ctrl+V gambar langsung ke form
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: ClipboardEvent) => {
+      const it = Array.from(e.clipboardData?.items ?? []).find(i => i.type.startsWith('image/'));
+      const file = it?.getAsFile();
+      if (file) { e.preventDefault(); scanFile(file); }
+    };
+    window.addEventListener('paste', h);
+    return () => window.removeEventListener('paste', h);
+  }, [open, scanFile]);
+
+  const save = async () => {
+    setErr('');
+    if (!f.firstName.trim() || !f.lastName.trim() || !f.citizenId.trim()) { setErr('Nama depan, nama belakang, dan Citizen ID wajib diisi.'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/relasi', { method: f.id ? 'PUT' : 'POST', headers: staffHeaders(deviceId), body: JSON.stringify(f) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Gagal menyimpan');
+      notify(f.id ? 'Relasi diperbarui' : 'Relasi ditambahkan', 'good');
+      onSaved(); onClose();
+    } catch (e: any) { setErr(e?.message || 'Gagal menyimpan'); } finally { setSaving(false); }
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title={f.id ? 'Edit Relasi' : 'Tambah Relasi'} tall>
+      <div className="flex-1 space-y-4 overflow-y-auto px-5 pb-4">
+        <div
+          onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
+          onDrop={e => { e.preventDefault(); setDrag(false); const file = e.dataTransfer.files?.[0]; if (file && file.type.startsWith('image/')) scanFile(file); }}
+          className={`relative overflow-hidden rounded-2xl border-2 border-dashed p-4 text-center transition ${drag ? 'border-accent bg-accent/10' : 'border-line bg-hover/40'}`}
+        >
+          {preview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={preview} alt="Screenshot KTP" className="mx-auto max-h-40 rounded-lg object-contain" />
+          ) : (
+            <div className="py-3">
+              <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-2xl bg-accent/15 text-accent"><ScanIcon className="h-6 w-6" /></div>
+              <div className="text-sm font-medium text-main">Isi otomatis dari screenshot KTP</div>
+              <div className="mt-1 text-[11px] text-muted">Tempel (Ctrl+V), seret gambar ke sini, atau pilih file</div>
+            </div>
+          )}
+          <button onClick={() => fileRef.current?.click()} disabled={scan === 'scanning'} className="mt-3 rounded-lg bg-hover px-3 py-1.5 text-xs font-medium text-main disabled:opacity-50">{preview ? 'Ganti gambar' : 'Pilih gambar'}</button>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) scanFile(file); e.target.value = ''; }} />
+          {scan === 'scanning' && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-card/85 backdrop-blur-sm">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+              <span className="text-xs font-medium text-main">Membaca KTP…</span>
+            </div>
+          )}
+        </div>
+        {scanMsg && <div className={`rounded-xl px-3 py-2 text-xs ${scan === 'error' ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-500'}`}>{scanMsg}</div>}
+
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className={LABEL}>Nama depan *</label><input value={f.firstName} onChange={e => set('firstName', e.target.value)} maxLength={60} className={FIELD} /></div>
+          <div><label className={LABEL}>Nama belakang *</label><input value={f.lastName} onChange={e => set('lastName', e.target.value)} maxLength={60} className={FIELD} /></div>
+          <div className="col-span-2"><label className={LABEL}>Citizen ID *</label><input value={f.citizenId} onChange={e => set('citizenId', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} maxLength={16} className={`${FIELD} font-mono`} /></div>
+          <div><label className={LABEL}>Tanggal lahir</label><input type="date" value={f.dob} onChange={e => set('dob', e.target.value)} className={FIELD} /></div>
+          <div>
+            <label className={LABEL}>Jenis kelamin</label>
+            <select value={f.sex} onChange={e => set('sex', e.target.value)} className={FIELD}><option value="">—</option><option value="MALE">Male</option><option value="FEMALE">Female</option></select>
+          </div>
+          <div><label className={LABEL}>Kebangsaan</label><input value={f.nationality} onChange={e => set('nationality', e.target.value)} maxLength={40} className={FIELD} /></div>
+          <div><label className={LABEL}>Jabatan di CC</label><input value={f.rank} onChange={e => set('rank', e.target.value)} maxLength={60} placeholder="Caporegime" className={FIELD} /></div>
+          <div className="col-span-2"><label className={LABEL}>Hubungan / keterangan relasi</label><input value={f.relation} onChange={e => set('relation', e.target.value)} maxLength={80} placeholder="Sekutu, kontak, dll." className={FIELD} /></div>
+          <div className="col-span-2"><label className={LABEL}>Catatan</label><textarea value={f.notes} onChange={e => set('notes', e.target.value)} maxLength={500} rows={3} className={`${FIELD} resize-none`} /></div>
+        </div>
+
+        <div className="flex items-center justify-between rounded-2xl border border-line px-4 py-3">
+          <div><div className="text-sm text-main">Relasi aktif</div><div className="text-[11px] text-subtle">Hanya relasi aktif yang tampil di monitoring</div></div>
+          <Toggle on={f.active} onChange={v => set('active', v)} />
+        </div>
+        {err && <div className="rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-500">{err}</div>}
+      </div>
+      <div className="flex shrink-0 gap-2 border-t border-line p-4">
+        <button onClick={onClose} className="flex-1 rounded-xl bg-hover py-3 text-sm font-medium text-main">Batal</button>
+        <button onClick={save} disabled={saving || scan === 'scanning'} className="flex-1 rounded-xl bg-accent py-3 text-sm font-semibold text-accent-text disabled:opacity-50">{saving ? 'Menyimpan…' : f.id ? 'Simpan Perubahan' : 'Tambah Relasi'}</button>
+      </div>
+    </Sheet>
+  );
+}
+
+/* ── Panel kelola relasi (khusus staff: Moderator & Super Admin) ── */
+function RelasiPanel({ open, onClose, deviceId, items, loading, onReload, onlineMap, notify }: {
+  open: boolean; onClose: () => void; deviceId: string; items: Relasi[]; loading: boolean; onReload: () => void; onlineMap: Map<string, EnrichedPlayer>; notify: (t: string, k?: ToastItem['kind']) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [filter, setFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE' | 'ONLINE'>('ALL');
+  const [sheet, setSheet] = useState<{ open: boolean; initial: RelasiForm | null }>({ open: false, initial: null });
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const counts = useMemo(() => ({
+    all: items.length,
+    active: items.filter(r => r.active).length,
+    inactive: items.filter(r => !r.active).length,
+    online: items.filter(r => onlineMap.has(r.id)).length,
+  }), [items, onlineMap]);
+
+  const list = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return items
+      .filter(r => {
+        if (filter === 'ACTIVE' && !r.active) return false;
+        if (filter === 'INACTIVE' && r.active) return false;
+        if (filter === 'ONLINE' && !onlineMap.has(r.id)) return false;
+        if (needle && !`${fullName(r)} ${r.citizenId} ${r.rank ?? ''} ${r.relation ?? ''}`.toLowerCase().includes(needle)) return false;
+        return true;
+      })
+      .sort((a, b) => Number(onlineMap.has(b.id)) - Number(onlineMap.has(a.id)) || Number(b.active) - Number(a.active) || fullName(a).localeCompare(fullName(b), 'id'));
+  }, [items, q, filter, onlineMap]);
+
+  const toggleActive = async (r: Relasi) => {
+    setBusy(r.id);
+    try {
+      const res = await fetch('/api/relasi', { method: 'PUT', headers: staffHeaders(deviceId), body: JSON.stringify({ ...toForm(r), active: !r.active }) });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || 'Gagal mengubah status'); }
+      notify(`${fullName(r)} ${r.active ? 'dinonaktifkan' : 'diaktifkan'}`, 'info');
+      onReload();
+    } catch (e: any) { notify(e?.message || 'Gagal mengubah status', 'bad'); } finally { setBusy(null); }
+  };
+
+  const remove = async (r: Relasi) => {
+    if (!confirm(`Hapus relasi ${fullName(r)}? Tindakan ini tidak bisa dibatalkan.`)) return;
+    setBusy(r.id);
+    try {
+      const res = await fetch(`/api/relasi?id=${encodeURIComponent(r.id)}`, { method: 'DELETE', headers: staffHeaders(deviceId, false) });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || 'Gagal menghapus'); }
+      notify('Relasi dihapus', 'info'); onReload();
+    } catch (e: any) { notify(e?.message || 'Gagal menghapus', 'bad'); } finally { setBusy(null); }
+  };
+
+  if (!open) return null;
+
+  const chips: { id: typeof filter; label: string; n: number }[] = [
+    { id: 'ALL', label: 'Semua', n: counts.all }, { id: 'ACTIVE', label: 'Aktif', n: counts.active },
+    { id: 'INACTIVE', label: 'Nonaktif', n: counts.inactive }, { id: 'ONLINE', label: 'Online', n: counts.online },
+  ];
+
+  return (
+    <div className="ios-enter fixed inset-0 z-[100] flex flex-col bg-app">
+      <header className="flex flex-col gap-3 border-b border-line bg-card px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-500/15 text-red-400"><UsersIcon className="h-5 w-5" /></span>
+          <div><h1 className="text-lg font-bold sm:text-xl">Relasi Crimson Creed</h1><p className="text-[11px] text-muted">Data relasi, status aktif, dan pantauan online</p></div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setSheet({ open: true, initial: null })} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover">+ Tambah Relasi</button>
+          <button onClick={onClose} className="rounded-lg bg-hover px-4 py-2 text-sm font-medium transition hover:bg-line">Tutup</button>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <div className="mx-auto max-w-5xl space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap gap-2">
+              {chips.map(c => (
+                <button key={c.id} onClick={() => setFilter(c.id)} className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition ${filter === c.id ? 'bg-accent text-accent-text' : 'border border-line bg-card text-muted hover:text-main'}`}>{c.label} <span className="opacity-70">{c.n}</span></button>
+              ))}
+            </div>
+            <div className="relative w-full sm:w-72">
+              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder="Cari nama / Citizen ID / jabatan…" className="w-full rounded-xl border border-line bg-card py-2.5 pl-10 pr-3 text-sm text-main outline-none focus:border-accent" />
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="py-16 text-center text-sm text-subtle">Memuat relasi…</div>
+          ) : list.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-line py-16 text-center text-sm text-subtle">{items.length === 0 ? 'Belum ada relasi. Klik "Tambah Relasi" untuk mulai mendata.' : 'Tidak ada hasil.'}</div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {list.map(r => {
+                const pl = onlineMap.get(r.id);
+                return (
+                  <div key={r.id} className={`rounded-2xl border border-line bg-card p-4 transition ${r.active ? '' : 'opacity-60'}`}>
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-sm font-bold uppercase text-red-400">{(r.firstName[0] ?? '') + (r.lastName[0] ?? '')}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-sm font-semibold text-main">{fullName(r)}</span>
+                          {pl ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-500"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />ONLINE · {pl.ping}ms</span>
+                            : <span className="rounded-full bg-hover px-2 py-0.5 text-[10px] font-bold text-subtle">OFFLINE</span>}
+                          {!r.active && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-500">NONAKTIF</span>}
+                        </div>
+                        <div className="mt-0.5 font-mono text-[11px] text-subtle">{r.citizenId}</div>
+                      </div>
+                    </div>
+                    <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[12px]">
+                      <div><dt className="text-[10px] uppercase tracking-wider text-subtle">Lahir</dt><dd className="text-main">{r.dob || '—'}</dd></div>
+                      <div><dt className="text-[10px] uppercase tracking-wider text-subtle">Gender</dt><dd className="text-main">{r.sex || '—'}</dd></div>
+                      <div><dt className="text-[10px] uppercase tracking-wider text-subtle">Kebangsaan</dt><dd className="text-main">{r.nationality || '—'}</dd></div>
+                      <div><dt className="text-[10px] uppercase tracking-wider text-subtle">Jabatan</dt><dd className="text-main">{r.rank || '—'}</dd></div>
+                      <div className="col-span-2"><dt className="text-[10px] uppercase tracking-wider text-subtle">Hubungan</dt><dd className="text-main">{r.relation || '—'}</dd></div>
+                      {r.notes && <div className="col-span-2"><dt className="text-[10px] uppercase tracking-wider text-subtle">Catatan</dt><dd className="whitespace-pre-wrap text-muted">{r.notes}</dd></div>}
+                    </dl>
+                    <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
+                      <label className="flex items-center gap-2 text-xs text-muted"><Toggle on={r.active} onChange={() => { if (busy !== r.id) toggleActive(r); }} />{r.active ? 'Aktif' : 'Nonaktif'}</label>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => setSheet({ open: true, initial: toForm(r) })} className="rounded px-2.5 py-1 text-xs font-medium text-accent hover:bg-accent/10">Edit</button>
+                        <button onClick={() => remove(r)} disabled={busy === r.id} className="rounded px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-500/10 disabled:opacity-40">Hapus</button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <RelasiFormSheet open={sheet.open} initial={sheet.initial} deviceId={deviceId} items={items} onClose={() => setSheet(s => ({ ...s, open: false }))} onSaved={onReload} notify={notify} />
+    </div>
   );
 }
