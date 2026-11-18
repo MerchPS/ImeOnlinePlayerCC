@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
 
-// Wajib ditambahkan agar Next.js menggunakan Node.js, bukan Edge Runtime.
-// Edge Runtime sering memblokir koneksi ke port non-standar seperti 30120.
 export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic'; // Memastikan data selalu fresh, tidak di-cache statis
+export const dynamic = 'force-dynamic';
 
 const GATES = [
   { name: 'Main Gate', url: 'http://main.imeroleplay.com:30120' },
@@ -11,34 +9,37 @@ const GATES = [
 ];
 
 async function getJSON(url: string, timeoutMs = 8000) {
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: {
-      Accept: 'application/json',
-      'User-Agent': 'IME-Web-Monitor/1.0'
-    },
-    cache: 'no-store'
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'IME-Web-Monitor/1.0'
+      },
+      cache: 'no-store'
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (error: any) {
+    // Menangkap error asli dari sistem (misal: fetch failed, ETIMEDOUT)
+    const cause = error.cause ? ` (${error.cause.code || error.cause.message})` : '';
+    throw new Error(`${error.message}${cause}`);
+  }
 }
 
 export async function GET() {
-  let lastError: Error | null = null;
+  let lastError: string | null = null;
 
-  // Loop ini akan mengeksekusi Main Gate terlebih dahulu.
-  // Jika Main Gate gagal (timeout/error), baru lanjut ke International Gate.
   for (const gate of GATES) {
     try {
-      console.log(`[Monitor API] Mencoba menghubungi: ${gate.name}...`);
+      console.log(`[Monitor API] Mencoba: ${gate.name}...`);
       
-      // Kita beri timeout 8 detik untuk Main Gate
       const [players, dynamic] = await Promise.all([
         getJSON(`${gate.url}/players.json`, 8000),
         getJSON(`${gate.url}/dynamic.json`, 8000)
       ]);
 
-      if (!Array.isArray(players)) throw new Error('Invalid players.json format');
+      if (!Array.isArray(players)) throw new Error('Format players.json bukan Array');
 
       const cleaned = players.map((p: any) => ({
         id: Number(p.id ?? 0),
@@ -46,7 +47,7 @@ export async function GET() {
         ping: Number(p.ping ?? 0)
       }));
 
-      console.log(`[Monitor API] Sukses terhubung ke ${gate.name}. Total player: ${cleaned.length}`);
+      console.log(`[Monitor API] Sukses: ${gate.name} (${cleaned.length} players)`);
 
       return NextResponse.json(
         {
@@ -59,26 +60,23 @@ export async function GET() {
         },
         {
           headers: {
-            // Cache selama 15 detik di CDN (Vercel/Next.js), lalu revalidate di background
             'Cache-Control': 's-maxage=15, stale-while-revalidate=45'
           }
         }
       );
     } catch (err: any) {
-      lastError = err;
-      // Jika Main Gate gagal, log akan muncul, lalu loop akan lanjut ke International Gate
-      console.warn(`[Monitor API] ${gate.name} GAGAL: ${err.message}`);
+      lastError = err.message;
+      console.warn(`[Monitor API] Gagal di ${gate.name}: ${lastError}`);
     }
   }
 
-  // Jika kedua gate gagal
-  console.error(`[Monitor API] Semua gate gagal. Error terakhir: ${lastError?.message}`);
-  
+  // KEMBALIKAN PESAN ERROR ASLI KE FRONTEND
   return NextResponse.json(
     {
       ok: false,
       error: 'Semua gate IME tidak bisa dihubungi',
-      detail: lastError?.message ?? null
+      detail: lastError, // Ini akan memberitahu Anda kenapa gagalnya
+      hint: 'Jika detail berisi "fetch failed" atau "ETIMEDOUT", hosting Anda (seperti Vercel) memblokir port 30120. Anda butuh VPS untuk proxy.'
     },
     { status: 502 }
   );
