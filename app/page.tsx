@@ -322,7 +322,7 @@ export default function App() {
         </div>
       </div>
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} current={settings} onSave={handleSaveSettings} />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} current={settings} onSave={handleSaveSettings} deviceId={deviceId} />
 
       {showChangelog && (
         <ChangelogModal onClose={() => {
@@ -1948,8 +1948,13 @@ function Segmented<T extends string | number>({ value, options, onChange }: { va
   );
 }
 
-function SettingsModal({ open, onClose, current, onSave }: { open: boolean; onClose: () => void; current: Settings; onSave: (s: Settings) => void }) {
+function SettingsModal({ open, onClose, current, onSave, deviceId }: { open: boolean; onClose: () => void; current: Settings; onSave: (s: Settings) => void; deviceId: string }) {
   const [draft, setDraft] = useState<Settings>(current);
+  const [idCopied, setIdCopied] = useState(false);
+  const copyId = async () => {
+    try { await navigator.clipboard.writeText(deviceId); setIdCopied(true); setTimeout(() => setIdCopied(false), 1800); }
+    catch { /* clipboard diblokir */ }
+  };
   useEffect(() => { if (open) setDraft(current); }, [open, current]);
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => {
     setDraft(d => ({ ...d, [k]: v }));
@@ -1996,6 +2001,14 @@ function SettingsModal({ open, onClose, current, onSave }: { open: boolean; onCl
               <Toggle on={draft[k]} onChange={v => set(k, v)} />
             </div>
           ))}
+        </div>
+        <div className="rounded-2xl border border-line bg-hover/40 p-4">
+          <div className="mb-1 text-xs font-medium text-muted">Device ID kamu</div>
+          <div className="select-all break-all rounded-xl bg-app px-3 py-2.5 font-mono text-[12px] text-main">{deviceId || '—'}</div>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <p className="text-[11px] leading-snug text-subtle">Berikan ID ini ke admin jika diminta untuk ACC atau jadi moderator. Jangan dibagikan ke orang lain.</p>
+            <button onClick={copyId} disabled={!deviceId} className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-text disabled:opacity-40">{idCopied ? 'Tersalin ✓' : 'Salin'}</button>
+          </div>
         </div>
       </div>
       <div className="flex shrink-0 gap-2 border-t border-line p-4">
