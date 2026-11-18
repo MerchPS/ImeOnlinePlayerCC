@@ -1,5 +1,4 @@
-import { getMember } from '@/src/lib/staff';
-import { rateLimit } from '@/src/lib/rateLimit';
+import { NextResponse } from 'next/server';
 
 export const maxDuration = 60;
 
@@ -35,7 +34,6 @@ class ThinkFilter {
       if (this.inside) {
         const idx = this.buf.indexOf('</think>');
         if (idx === -1) {
-          // simpan ekor (maks 8 char) untuk jaga-jaga closing tag terbelah
           const keep = Math.min(8, this.buf.length);
           this.buf = this.buf.slice(this.buf.length - keep);
           return out;
@@ -45,7 +43,6 @@ class ThinkFilter {
       } else {
         const idx = this.buf.indexOf('<think>');
         if (idx === -1) {
-          // cek kemungkinan opening tag parsial di ekor
           const keep = Math.min(7, this.buf.length);
           const tail = this.buf.slice(this.buf.length - keep);
           if (keep > 0 && '<think>'.startsWith(tail)) {
@@ -73,17 +70,6 @@ class ThinkFilter {
 
 export async function POST(req: Request) {
   try {
-    const who = await getMember(req);
-    if (!who) {
-      return json(
-        'Akses AI ditolak. Pastikan akunmu sudah di-ACC (cek nama model di lib/staff.ts).',
-        401,
-      );
-    }
-    if (!rateLimit(`ai:${who.deviceId}`, 15, 60_000)) {
-      return json('Terlalu banyak pertanyaan, tunggu sebentar.', 429);
-    }
-
     const key = process.env.AI_API_KEY;
     if (!key) {
       return json(
@@ -112,7 +98,6 @@ export async function POST(req: Request) {
       ? JSON.stringify(body.context)
       : 'Tidak ada data player.';
 
-    // Context disuntikkan ke pesan user pertama (seperti versi lama)
     const fullMessages = messages.map((m: any, i: number) => {
       if (i === 0 && m.role === 'user') {
         return {
@@ -123,7 +108,6 @@ export async function POST(req: Request) {
       return { role: m.role, content: m.content };
     });
 
-    // OpenAI-compatible: system prompt jadi message pertama
     const openaiMessages = [
       { role: 'system', content: SYSTEM },
       ...fullMessages,
