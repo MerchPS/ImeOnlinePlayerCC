@@ -7,7 +7,7 @@ import { rateLimit } from '@/src/lib/rateLimit';
 
 export const maxDuration = 30;
 
-const MODEL = process.env.RELASI_SCAN_MODEL || 'claude-sonnet-5-5';
+const MODEL = process.env.RELASI_SCAN_MODEL || 'deepseek-v4-flash-vision-exp';
 const MAX_B64 = 4_000_000; // ± 3 MB gambar; batas payload agar tidak membebani server
 const MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
