@@ -378,12 +378,12 @@ const MS_CSS = `
 @keyframes ms-ripple { from { transform: scale(0); } to { transform: scale(160); } }
 @keyframes ms-blink { 50% { opacity: .3; } }
 
-.ms-blob { position: absolute; border-radius: 9999px; filter: blur(110px); animation: ms-aurora 14s ease-in-out infinite; pointer-events: none; }
+.ms-blob { position: absolute; border-radius: 9999px; pointer-events: none; background: radial-gradient(circle at center, rgba(var(--c), .5), rgba(var(--c), 0) 65%); animation: ms-aurora 16s ease-in-out infinite; will-change: transform; }
 .ms-grid { position: absolute; inset: 0; pointer-events: none; opacity: .5;
   background-image: linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
   background-size: 56px 56px;
   -webkit-mask-image: radial-gradient(ellipse at center, #000 20%, transparent 70%); mask-image: radial-gradient(ellipse at center, #000 20%, transparent 70%); }
-.ms-dot { position: absolute; bottom: -10px; border-radius: 9999px; background: rgba(255,255,255,.7); animation: ms-float linear infinite; pointer-events: none; }
+.ms-dot { position: absolute; bottom: -10px; border-radius: 9999px; background: rgba(var(--c), .85); box-shadow: 0 0 6px rgba(var(--c), .8); animation: ms-float linear infinite; pointer-events: none; }
 .ms-head { animation: ms-drop .8s cubic-bezier(.2,.8,.2,1) backwards; }
 .ms-title { background: linear-gradient(90deg, #fff 0%, #a5b4fc 25%, #fff 50%, #fda4af 75%, #fff 100%); background-size: 200% auto; -webkit-background-clip: text; background-clip: text; color: transparent; animation: ms-shimmer 6s linear infinite; }
 .ms-live { display: inline-block; width: 7px; height: 7px; border-radius: 9999px; background: #34d399; animation: ms-blink 1.6s ease-in-out infinite; }
@@ -435,11 +435,32 @@ const MS_CSS = `
 .ms-pct { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; font-variant-numeric: tabular-nums; }
 .ms-step { min-height: 20px; font-size: 13px; color: rgba(255,255,255,.65); animation: ms-stepin .35s ease; }
 @keyframes ms-stepin { from { opacity: 0; transform: translateY(6px); } }
+.ms-tint { position: absolute; inset: 0; pointer-events: none; transition: opacity .6s ease; }
+.ms-tint-cc { background: radial-gradient(ellipse 70% 60% at 12% 55%, rgba(239,68,68,.26), transparent 70%); }
+.ms-tint-all { background: radial-gradient(ellipse 70% 60% at 88% 55%, rgba(59,130,246,.26), transparent 70%); }
+.ms-beam { position: absolute; left: 50%; top: 50%; width: 140vmax; height: 140vmax; margin: -70vmax 0 0 -70vmax; pointer-events: none; opacity: .55; will-change: transform;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(239,68,68,.11) 18deg, transparent 52deg, transparent 180deg, rgba(59,130,246,.11) 198deg, transparent 232deg);
+  -webkit-mask-image: radial-gradient(circle, #000 0%, transparent 62%); mask-image: radial-gradient(circle, #000 0%, transparent 62%);
+  animation: ms-spin 45s linear infinite; }
+@keyframes ms-spin { to { transform: rotate(360deg); } }
+.ms-floor { position: absolute; left: 0; right: 0; bottom: 0; height: 48%; overflow: hidden; pointer-events: none; perspective: 420px;
+  -webkit-mask-image: linear-gradient(to top, #000 8%, transparent 88%); mask-image: linear-gradient(to top, #000 8%, transparent 88%); }
+.ms-floor > div { position: absolute; left: -60%; right: -60%; top: 0; bottom: -120px; transform-origin: 50% 0; transform: rotateX(62deg); will-change: transform;
+  background-image: linear-gradient(rgba(255,255,255,.13) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.13) 1px, transparent 1px); background-size: 60px 60px;
+  animation: ms-floor 2.4s linear infinite; }
+@keyframes ms-floor { from { transform: rotateX(62deg) translateY(0); } to { transform: rotateX(62deg) translateY(60px); } }
+.ms-streak { position: absolute; height: 1.5px; width: 190px; pointer-events: none; opacity: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.95), transparent); animation: ms-streak 7s ease-in infinite; }
+@keyframes ms-streak { 0% { opacity: 0; transform: translate3d(0,0,0) rotate(-30deg); } 3% { opacity: 1; } 13% { opacity: 0; transform: translate3d(-560px,323px,0) rotate(-30deg); } 100% { opacity: 0; transform: translate3d(-560px,323px,0) rotate(-30deg); } }
+.ms-spot { position: fixed; top: 0; left: 0; width: 600px; height: 600px; border-radius: 9999px; pointer-events: none; will-change: transform; transform: translate3d(-9999px,-9999px,0);
+  background: radial-gradient(circle, rgba(255,255,255,.08), transparent 60%); }
+.ms-noise { position: absolute; inset: 0; pointer-events: none; opacity: .06;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"); }
+.ms-vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,.65)); }
 @media (prefers-reduced-motion: reduce) { .ms-root *, .ms-root *::before { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
 `;
 
-function ModeCard({ title, desc, tint, tilt, delay, icon, badge, state, onPick }: {
-  title: string; desc: string; tint: string; tilt: string; delay: string; icon: string; badge?: string;
+function ModeCard({ title, desc, tint, tilt, delay, icon, badge, state, onPick, onHover }: {
+  title: string; desc: string; tint: string; tilt: string; delay: string; icon: string; badge?: string; onHover?: (on: boolean) => void;
   state: 'idle' | 'picked' | 'dim'; onPick: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
@@ -454,13 +475,14 @@ function ModeCard({ title, desc, tint, tilt, delay, icon, badge, state, onPick }
     el.style.setProperty('--my', `${(py * 100).toFixed(1)}%`);
   };
   const reset = () => {
+    onHover?.(false);
     const el = ref.current; if (!el) return;
     el.style.setProperty('--rx', '0deg'); el.style.setProperty('--ry', '0deg');
     el.style.setProperty('--mx', '50%'); el.style.setProperty('--my', '50%');
   };
   return (
     <button
-      ref={ref} onClick={onPick} onPointerMove={move} onPointerLeave={reset}
+      ref={ref} onClick={onPick} onPointerMove={move} onPointerEnter={() => onHover?.(true)} onPointerLeave={reset}
       className={`ms-card ${state === 'picked' ? 'is-picked' : state === 'dim' ? 'is-dim' : ''}`}
       style={{ ['--tint' as string]: tint, ['--delay' as string]: delay, ['--tilt' as string]: tilt }}
     >
@@ -476,6 +498,68 @@ function ModeCard({ title, desc, tint, tilt, delay, icon, badge, state, onPick }
   );
 }
 
+/* Background layar pilihan: hanya animasi transform/opacity (ringan di GPU), tanpa blur filter besar */
+function MsBackground({ hover, lite, gifOk, onGifError }: { hover: Mode | null; lite: boolean; gifOk: boolean; onGifError: () => void }) {
+  const spot = useRef<HTMLDivElement>(null);
+  const raf = useRef(0);
+
+  // Cahaya yang mengikuti kursor (diperbarui langsung ke DOM, tanpa re-render React)
+  useEffect(() => {
+    const el = spot.current;
+    if (!el || lite) return;
+    const move = (e: PointerEvent) => {
+      cancelAnimationFrame(raf.current);
+      raf.current = requestAnimationFrame(() => { el.style.transform = `translate3d(${e.clientX - 300}px, ${e.clientY - 300}px, 0)`; });
+    };
+    window.addEventListener('pointermove', move, { passive: true });
+    return () => { window.removeEventListener('pointermove', move); cancelAnimationFrame(raf.current); };
+  }, [lite]);
+
+  const dots = useMemo(() => {
+    const colors = ['239,68,68', '59,130,246', '255,255,255'];
+    return Array.from({ length: lite ? 10 : 26 }, (_, i) => ({
+      left: (i * 37) % 100, size: 2 + (i % 4), dur: 9 + (i % 7) * 2, delay: -((i * 1.7) % 12), drift: ((i % 5) - 2) * 18, c: colors[i % 3],
+    }));
+  }, [lite]);
+
+  return (
+    <>
+      {gifOk && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={IME_GIF} alt="" aria-hidden onError={onGifError} draggable={false} className="ms-bg pointer-events-none absolute inset-0 h-full w-full scale-105 select-none object-cover opacity-30" />
+      )}
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#05060a]/65 via-[#05060a]/80 to-[#05060a]" />
+
+      {/* Warna latar ikut berubah saat kursor di atas kartu */}
+      <div className="ms-tint ms-tint-cc" style={{ opacity: hover === 'CC' ? 1 : 0 }} />
+      <div className="ms-tint ms-tint-all" style={{ opacity: hover === 'ALL' ? 1 : 0 }} />
+
+      <div className="ms-blob" style={{ top: '-22%', left: '-14%', width: '58%', height: '58%', ['--c' as string]: '239,68,68' }} />
+      <div className="ms-blob" style={{ bottom: '-24%', right: '-14%', width: '60%', height: '60%', animationDelay: '-6s', ['--c' as string]: '59,130,246' }} />
+      <div className="ms-blob" style={{ top: '28%', left: '36%', width: '34%', height: '34%', animationDelay: '-11s', ['--c' as string]: '168,85,247' }} />
+
+      {!lite && <div className="ms-beam" />}
+      <div className="ms-floor"><div /></div>
+
+      {!lite && (
+        <>
+          <span className="ms-streak" style={{ top: '6%', left: '82%', animationDelay: '1s' }} />
+          <span className="ms-streak" style={{ top: '16%', left: '94%', animationDelay: '3.6s', width: 140 }} />
+          <span className="ms-streak" style={{ top: '30%', left: '70%', animationDelay: '5.4s', width: 220 }} />
+        </>
+      )}
+
+      {dots.map((d, i) => (
+        <span key={i} className="ms-dot" style={{ left: `${d.left}%`, width: d.size, height: d.size, animationDuration: `${d.dur}s`, animationDelay: `${d.delay}s`, ['--d' as string]: `${d.drift}px`, ['--c' as string]: d.c }} />
+      ))}
+
+      {!lite && <div ref={spot} className="ms-spot" />}
+      <div className="ms-noise" />
+      <div className="ms-vignette" />
+    </>
+  );
+}
+
 const MS_STEPS: Record<Mode, string[]> = {
   CC: ['Menyambungkan ke server…', 'Menyinkronkan data faction…', 'Memuat anggota Crimson Creed…', 'Menyiapkan panel relasi…'],
   ALL: ['Menyambungkan ke server…', 'Menyinkronkan data faction…', 'Memuat seluruh player…', 'Menyiapkan dashboard…'],
@@ -488,6 +572,9 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
   const [pct, setPct] = useState(0);
   const [gifOk, setGifOk] = useState(true);
   const [stats, setStats] = useState<{ all: number; cc: number } | null>(null);
+  const [hover, setHover] = useState<Mode | null>(null);
+  // Perangkat lemah / hemat gerak => efek berat dimatikan otomatis
+  const [lite] = useState(() => typeof window !== 'undefined' && ((navigator.hardwareConcurrency ?? 8) <= 4 || !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches));
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -509,10 +596,6 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
     }).catch(() => { /* kartu tetap tampil tanpa angka */ });
     return () => { off = true; };
   }, []);
-
-  const particles = useMemo(() => Array.from({ length: 24 }, (_, i) => ({
-    left: (i * 37) % 100, size: 2 + (i % 4), dur: 9 + (i % 7) * 2, delay: -((i * 1.7) % 12), drift: ((i % 5) - 2) * 18,
-  })), []);
 
   const choose = (mode: Mode, e: React.MouseEvent<HTMLButtonElement>) => {
     if (picked) return;
@@ -553,19 +636,7 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
     <div className="ms-root relative flex min-h-screen items-center justify-center overflow-hidden bg-[#05060a] p-4 font-sans" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
       <style>{MS_CSS}</style>
 
-      {/* GIF IME Roleplay sebagai latar penuh (diredupkan agar teks tetap terbaca) */}
-      {gifOk && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={IME_GIF} alt="" aria-hidden onError={() => setGifOk(false)} draggable={false} className="ms-bg pointer-events-none absolute inset-0 h-full w-full scale-105 select-none object-cover opacity-35 blur-[3px]" />
-      )}
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#05060a]/60 via-[#05060a]/80 to-[#05060a]" />
-
-      <div className="ms-blob" style={{ top: '-18%', left: '-12%', width: '52%', height: '52%', background: 'rgba(239,68,68,.22)' }} />
-      <div className="ms-blob" style={{ bottom: '-20%', right: '-12%', width: '55%', height: '55%', background: 'rgba(59,130,246,.22)', animationDelay: '-6s' }} />
-      <div className="ms-grid" />
-      {particles.map((p, i) => (
-        <span key={i} className="ms-dot" style={{ left: `${p.left}%`, width: p.size, height: p.size, animationDuration: `${p.dur}s`, animationDelay: `${p.delay}s`, ['--d' as string]: `${p.drift}px` }} />
-      ))}
+      <MsBackground hover={hover} lite={lite} gifOk={gifOk} onGifError={() => setGifOk(false)} />
 
       <div className="relative z-10 w-full max-w-4xl">
         <div className="mb-10 text-center sm:mb-12" style={{ opacity: picked ? 0 : 1, transition: 'opacity .4s' }}>
@@ -587,13 +658,13 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-6">
           <ModeCard
             title="Crimson Creed Only" desc="Fokus memantau anggota dan relasi Crimson Creed."
-            tint="239,68,68" tilt="-6deg" delay=".25s" state={stateOf('CC')} onPick={e => choose('CC', e)}
+            tint="239,68,68" tilt="-6deg" delay=".25s" state={stateOf('CC')} onPick={e => choose('CC', e)} onHover={on => setHover(on ? 'CC' : null)}
             badge={stats ? `${stats.cc} online` : undefined}
             icon="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
           />
           <ModeCard
             title="All Factions" desc="Lihat semua player: semua faction, Civilian, serta Good dan Bad Side."
-            tint="59,130,246" tilt="6deg" delay=".4s" state={stateOf('ALL')} onPick={e => choose('ALL', e)}
+            tint="59,130,246" tilt="6deg" delay=".4s" state={stateOf('ALL')} onPick={e => choose('ALL', e)} onHover={on => setHover(on ? 'ALL' : null)}
             badge={stats ? `${stats.all} online` : undefined}
             icon="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
           />
@@ -1333,20 +1404,22 @@ function Home({ isAdmin, deviceId, role, viewMode, onSwitchMode, settings, onOpe
   const [relasiLoading, setRelasiLoading] = useState(true);
   const [relasiOpen, setRelasiOpen] = useState(false);
 
+  const showRelasi = isAdmin && viewMode === 'CC'; // relasi khusus Crimson Creed
+
   const loadRelasi = useCallback(async () => {
-    if (!isAdmin || !deviceId) return;
+    if (!showRelasi || !deviceId) return;
     try {
       const res = await fetch('/api/relasi', { headers: staffHeaders(deviceId, false), cache: 'no-store' });
       if (res.ok) setRelasi(await res.json());
     } catch { /* abaikan */ } finally { setRelasiLoading(false); }
-  }, [isAdmin, deviceId]);
+  }, [showRelasi, deviceId]);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!showRelasi) return;
     loadRelasi();
     const id = setInterval(loadRelasi, 30000);
     return () => clearInterval(id);
-  }, [isAdmin, loadRelasi]);
+  }, [showRelasi, loadRelasi]);
 
   const [factions, setFactions] = useState<FactionDef[]>(FALLBACK_FACTIONS);
   const [factionsError, setFactionsError] = useState(false);
@@ -1782,7 +1855,7 @@ function Home({ isAdmin, deviceId, role, viewMode, onSwitchMode, settings, onOpe
                 {pendingCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white border-2 border-app">{pendingCount}</span>}
               </button>
             )}
-            {isAdmin && (
+            {showRelasi && (
               <button onClick={() => setRelasiOpen(true)} className="flex h-8 items-center gap-2 rounded-full border border-red-500/30 bg-card px-3 text-red-400 transition hover:bg-red-500/10" title="Data relasi">
                 <UsersIcon className="h-4 w-4" /><span className="text-xs font-semibold">Relasi</span>
                 {relasi.length > 0 && <span className="rounded-full bg-red-500/20 px-1.5 text-[10px] font-bold">{relasi.length}</span>}
@@ -1806,7 +1879,7 @@ function Home({ isAdmin, deviceId, role, viewMode, onSwitchMode, settings, onOpe
         )}
 
         {viewMode === 'CC' && <CCPanel members={ccMembers} sessionMs={sessionMs} watch={watch} missing={ccIds.size === 0} />}
-        {viewMode === 'CC' && isAdmin && !relasiLoading && <RelasiMonitor items={relasi} onlineMap={relasiOnline} onOpen={() => setRelasiOpen(true)} />}
+        {showRelasi && !relasiLoading && <RelasiMonitor items={relasi} onlineMap={relasiOnline} onOpen={() => setRelasiOpen(true)} />}
 
         <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat label="Online" value={data ? fmt(data.online) : '—'} accent="text-emerald-500" pulse delta={delta} />
@@ -1939,9 +2012,9 @@ function Home({ isAdmin, deviceId, role, viewMode, onSwitchMode, settings, onOpe
         </div>
       </div>
 
-      {isAdmin && <RelasiPanel open={relasiOpen} onClose={() => setRelasiOpen(false)} deviceId={deviceId} items={relasi} loading={relasiLoading} onReload={loadRelasi} onlineMap={relasiOnline} notify={pushToast} />}
+      {showRelasi && <RelasiPanel open={relasiOpen} onClose={() => setRelasiOpen(false)} deviceId={deviceId} items={relasi} loading={relasiLoading} onReload={loadRelasi} onlineMap={relasiOnline} notify={pushToast} />}
       <HistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} sessions={sessionsRef.current} onlineNames={prevNamesRef.current} watch={watch} onToggleWatch={toggleWatch} />
-      <AIDrawer open={aiOpen} onClose={() => setAiOpen(false)} data={data} enriched={enriched} counts={counts} activeCat={activeCat} factionMap={factionMap} />
+      <AIDrawer open={aiOpen} onClose={() => setAiOpen(false)} data={data} enriched={enriched} counts={counts} activeCat={activeCat} factionMap={factionMap} deviceId={deviceId} />
     </main>
   );
 }
@@ -2026,38 +2099,79 @@ function HistoryModal({ open, onClose, sessions, onlineNames, watch, onToggleWat
 }
 
 /* ── Tanya AI ──
-   Mengasumsikan endpoint POST /api/ai menerima { messages, context } dan
-   mengembalikan { reply }. Sesuaikan jika route AI kamu berbeda. */
-function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factionMap }: {
-  open: boolean; onClose: () => void; data: ApiData | null; enriched: EnrichedPlayer[]; counts: Record<string, number>; activeCat: string; factionMap: Map<string, FactionDef>;
+   Memanggil POST /api/ai. Mendukung 2 bentuk jawaban:
+   - teks streaming (route baru: api-ai-route.ts)  -> jawaban muncul bertahap
+   - JSON { reply | content | message | text }      -> kompatibel dengan route lama
+   Ada batas waktu 60 detik dan tombol Stop, jadi tidak akan "nyangkut" selamanya. */
+function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factionMap, deviceId }: {
+  open: boolean; onClose: () => void; data: ApiData | null; enriched: EnrichedPlayer[]; counts: Record<string, number>; activeCat: string; factionMap: Map<string, FactionDef>; deviceId: string;
 }) {
   const [msgs, setMsgs] = useState<AiMsg[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs, loading]);
+  useEffect(() => { if (!open) abortRef.current?.abort(); }, [open]);
 
   const context = useMemo(() => {
     if (!open || !data) return '';
     const perFaction = Array.from(factionMap.values()).filter(f => (counts[f.id] ?? 0) > 0).map(f => `${f.label}: ${counts[f.id]}`).join(', ');
-    const list = enriched.slice(0, 200).map(p => `#${p.id} ${p.name} [${p.faction}/${p.side}] ping ${p.ping}`).join('\n');
+    const list = enriched.slice(0, 150).map(p => `#${p.id} ${p.name} [${p.faction}/${p.side}] ping ${p.ping}`).join('\n');
     return `Online: ${data.online}/${data.max}. Good: ${counts.GOOD}, Bad: ${counts.BAD}, Civilian: ${counts.CIVILIAN}. Kategori aktif: ${activeCat}.\nPer faction: ${perFaction}\nDaftar player:\n${list}`;
   }, [open, data, enriched, counts, activeCat, factionMap]);
 
   const send = async (text?: string) => {
     const content = (text ?? input).trim();
     if (!content || loading) return;
-    const next: AiMsg[] = [...msgs, { role: 'user', content }];
-    setMsgs(next); setInput(''); setLoading(true);
+
+    // Riwayat dikirim tanpa pesan error dan tanpa bubble kosong, maksimal 10 terakhir
+    const history = msgs.filter(m => m.content.trim() && !m.content.startsWith('⚠')).slice(-10);
+    setMsgs([...msgs, { role: 'user', content }, { role: 'assistant', content: '' }]);
+    setInput(''); setLoading(true);
+
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, 60000);
+    const setLast = (txt: string) => setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: 'assistant', content: txt }; return c; });
+    let got = '';
+
     try {
-      const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: next, context }) });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'AI gagal merespons');
-      setMsgs([...next, { role: 'assistant', content: String(json.reply ?? json.content ?? json.message ?? '') }]);
+      const res = await fetch('/api/ai', {
+        method: 'POST', signal: ctrl.signal, headers: staffHeaders(deviceId),
+        body: JSON.stringify({ messages: [...history, { role: 'user', content }], context }),
+      });
+      const ct = res.headers.get('content-type') || '';
+      if (!res.ok) {
+        const j = ct.includes('json') ? await res.json().catch(() => ({})) : {};
+        throw new Error(j.error || `Server AI error (${res.status})`);
+      }
+      if (ct.includes('application/json')) {
+        const j = await res.json();
+        got = String(j.reply ?? j.content ?? j.message ?? j.text ?? '').trim();
+        if (!got) throw new Error('AI tidak memberi jawaban.');
+        setLast(got);
+      } else {
+        if (!res.body) throw new Error('Respons kosong dari server.');
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          got += dec.decode(value, { stream: true });
+          setLast(got);
+        }
+        if (!got.trim()) throw new Error('AI tidak memberi jawaban.');
+      }
     } catch (e: any) {
-      setMsgs([...next, { role: 'assistant', content: `⚠ ${e.message || 'Terjadi kesalahan'}` }]);
-    } finally { setLoading(false); }
+      const aborted = e?.name === 'AbortError';
+      if (aborted && !timedOut && got.trim()) { /* dihentikan user: simpan jawaban sebagian */ }
+      else setLast(`⚠ ${aborted ? (timedOut ? 'AI terlalu lama merespons (60 detik). Coba lagi.' : 'Dihentikan.') : (e?.message || 'Terjadi kesalahan')}`);
+    } finally {
+      clearTimeout(timer); abortRef.current = null; setLoading(false);
+    }
   };
 
   const ideas = ['Faction mana yang paling ramai?', 'Ringkas kondisi server sekarang', 'Siapa saja yang pingnya tinggi?'];
@@ -2074,14 +2188,18 @@ function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factionMap
             </div>
           </div>
         )}
-        {msgs.map((m, i) => (
-          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[88%] rounded-2xl px-3.5 py-2 text-[13px] leading-relaxed ${m.role === 'user' ? 'rounded-br-md bg-accent text-accent-text' : 'rounded-bl-md bg-hover text-main'}`}>
-              {m.role === 'user' ? m.content : renderMarkdown(m.content)}
+        {msgs.map((m, i) => {
+          const pending = loading && i === msgs.length - 1 && m.role === 'assistant' && m.content === '';
+          return (
+            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[88%] rounded-2xl px-3.5 py-2 text-[13px] leading-relaxed ${m.role === 'user' ? 'rounded-br-md bg-accent text-accent-text' : 'rounded-bl-md bg-hover text-main'}`}>
+                {m.role === 'user' ? m.content : pending
+                  ? <span className="flex gap-1 py-1">{[0, 1, 2].map(k => <span key={k} className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: `${k * 0.15}s` }} />)}</span>
+                  : renderMarkdown(m.content)}
+              </div>
             </div>
-          </div>
-        ))}
-        {loading && <div className="flex justify-start"><div className="flex gap-1 rounded-2xl rounded-bl-md bg-hover px-4 py-3">{[0, 1, 2].map(i => <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: `${i * 0.15}s` }} />)}</div></div>}
+          );
+        })}
         <div ref={endRef} />
       </div>
       <div className="flex shrink-0 items-end gap-2 border-t border-line p-3">
@@ -2090,7 +2208,11 @@ function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factionMap
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
           className="max-h-28 flex-1 resize-none rounded-2xl bg-hover px-4 py-2.5 text-sm text-main outline-none placeholder:text-subtle"
         />
-        <button onClick={() => send()} disabled={loading || !input.trim()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-accent-text disabled:opacity-40" aria-label="Kirim">↑</button>
+        {loading ? (
+          <button onClick={() => abortRef.current?.abort()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-500 text-white" aria-label="Hentikan" title="Hentikan">■</button>
+        ) : (
+          <button onClick={() => send()} disabled={!input.trim()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-accent-text disabled:opacity-40" aria-label="Kirim">↑</button>
+        )}
       </div>
     </Sheet>
   );
