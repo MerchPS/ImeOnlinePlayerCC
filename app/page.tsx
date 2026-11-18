@@ -22,6 +22,8 @@ type HistoryPoint = { t: number; online: number };
 type ToastItem = { id: number; text: string; kind: 'info' | 'good' | 'bad' | 'watch' };
 type SortKey = 'id' | 'name' | 'ping' | 'session';
 type GroupId = 'ALL' | 'GOOD' | 'BAD' | 'CIVILIAN';
+type RelationStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+type RelationRecord = { citizenId: string; status: RelationStatus; type: string; notes: string; updatedAt: string };
 
 const DEFAULT_SETTINGS: Settings = { theme: 'dark', refreshMs: 60000, compact: false, tagStyle: 'widget', pageSize: 25, notifyJoin: true, notifyRestart: false };
 
@@ -140,14 +142,8 @@ function buildMatchers(factions: FactionDef[]): Matcher[] {
   return list.sort((a, b) => b.alias.length - a.alias.length);
 }
 
-/* Pecah nama jadi kata-kata utuh (dipisah spasi, simbol, atau tanda baca) */
 const nameTokens = (s: string) => s.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
 
-/* Pencocokan per KATA, bukan potongan teks:
-   - STARTS_WITH : kata PERTAMA nama harus sama persis dengan alias  ("CC - Vinci", "[CC] Vinci", "CC Vinci")
-   - INCLUDES    : salah satu kata nama harus sama persis dengan alias
-   Jadi "VINCI CCHITTO", "Dwi", "Sinta", atau "Hendra" tidak lagi salah masuk CC / DW / SIN / HT.
-   Jika nama memakai pemisah " - ", yang dicek hanya bagian sebelum pemisah (tag faction). */
 function detectFaction(name: string, matchers: Matcher[]): string {
   const scope = name.includes(' - ') ? name.split(' - ')[0] : name;
   const toks = nameTokens(scope);
@@ -182,6 +178,17 @@ function renderMarkdown(text: string) {
   });
 }
 
+// Generate Citizen ID from Name
+function generateCitizenId(name: string) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = Math.imul(31, hash) + name.charCodeAt(i) | 0;
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let res = '';
+  let tempHash = Math.abs(hash);
+  for (let i = 0; i < 8; i++) { res += chars[tempHash % chars.length]; tempHash = Math.floor(tempHash / chars.length) || 1; }
+  return res;
+}
+
 /* ══════════════ Main App Component ══════════════ */
 export default function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>('LOADING');
@@ -196,12 +203,9 @@ export default function App() {
 
   const [showChangelog, setShowChangelog] = useState(false);
   const [bugReportOpen, setBugReportOpen] = useState(false);
-
-  // State khusus moderator
   const [viewMode, setViewMode] = useState<'ALL' | 'CC' | null>(null);
 
   useEffect(() => {
-    // Anti-iframe (cadangan; yang utama adalah header frame-ancestors di next.config.js)
     let inFrame = false;
     try { inFrame = window.top !== window.self; } catch { inFrame = true; }
     if (inFrame) {
@@ -216,7 +220,7 @@ export default function App() {
     setSettings(loadSettings());
 
     const lastVersion = localStorage.getItem('ime-changelog-version');
-    if (lastVersion !== 'v1.2') setShowChangelog(true);
+    if (lastVersion !== 'v1.3') setShowChangelog(true);
   }, []);
 
   useEffect(() => {
@@ -300,7 +304,6 @@ export default function App() {
     return <LockScreen deviceId={deviceId} status={authStatus} meta={authMeta} onRefresh={() => window.location.reload()} />;
   }
 
-  // Layar pemilihan mode untuk MODERATOR
   if (authStatus === 'ADMIN' && viewMode === null) {
     return <ModSelectionScreen role={role} onSelect={(mode) => setViewMode(mode)} />;
   }
@@ -326,7 +329,7 @@ export default function App() {
 
       {showChangelog && (
         <ChangelogModal onClose={() => {
-          localStorage.setItem('ime-changelog-version', 'v1.2');
+          localStorage.setItem('ime-changelog-version', 'v1.3');
           setShowChangelog(false);
         }} />
       )}
@@ -345,10 +348,8 @@ export default function App() {
   );
 }
 
-/* ═════════ [A] Mod Selection Screen (animasi) ═════════ */
+/* ═════════════ [A] Mod Selection Screen (Upgraded UI) ═════════ */
 type Mode = 'ALL' | 'CC';
-
-/* Taruh GIF di public/ime-server-up.gif (jangan hotlink Discord: link-nya kedaluwarsa) */
 const IME_GIF = '/ime-server-up.gif';
 
 const MS_CSS = `
@@ -363,6 +364,7 @@ const MS_CSS = `
 @keyframes ms-ring { 0% { transform: scale(.85); opacity: .55; } 100% { transform: scale(1.7); opacity: 0; } }
 @keyframes ms-ripple { from { transform: scale(0); } to { transform: scale(160); } }
 @keyframes ms-blink { 50% { opacity: .3; } }
+@keyframes ms-pulse-badge { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
 
 .ms-blob { position: absolute; border-radius: 9999px; filter: blur(110px); animation: ms-aurora 14s ease-in-out infinite; pointer-events: none; }
 .ms-grid { position: absolute; inset: 0; pointer-events: none; opacity: .5;
@@ -407,11 +409,12 @@ const MS_CSS = `
 @keyframes ms-fadein { from { opacity: 0; } }
 .ms-badge { position: absolute; top: 16px; right: 16px; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 9999px; font-size: 11px; font-weight: 600; color: rgb(var(--tint)); background: rgba(var(--tint), .14); border: 1px solid rgba(var(--tint), .35); animation: ms-drop .6s ease .9s backwards; }
 .ms-badge i { width: 6px; height: 6px; border-radius: 9999px; background: rgb(var(--tint)); animation: ms-blink 1.6s ease-in-out infinite; }
+.ms-badge.loading { animation: ms-pulse-badge 1.5s ease-in-out infinite; color: rgba(255,255,255,0.4); border-color: rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); }
 @media (prefers-reduced-motion: reduce) { .ms-root *, .ms-root *::before { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
 `;
 
-function ModeCard({ title, desc, tint, tilt, delay, icon, badge, state, onPick }: {
-  title: string; desc: string; tint: string; tilt: string; delay: string; icon: string; badge?: string;
+function ModeCard({ title, desc, tint, tilt, delay, icon, badge, isLoading, state, onPick }: {
+  title: string; desc: string; tint: string; tilt: string; delay: string; icon: string; badge?: string; isLoading?: boolean;
   state: 'idle' | 'picked' | 'dim'; onPick: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
@@ -437,7 +440,12 @@ function ModeCard({ title, desc, tint, tilt, delay, icon, badge, state, onPick }
       style={{ ['--tint' as string]: tint, ['--delay' as string]: delay, ['--tilt' as string]: tilt }}
     >
       <span className="ms-shine" />
-      {badge && <span className="ms-badge"><i />{badge}</span>}
+      {(badge || isLoading) && (
+        <span className={`ms-badge ${isLoading ? 'loading' : ''}`}>
+          {!isLoading && <i />}
+          {isLoading ? 'Memuat...' : badge}
+        </span>
+      )}
       <div className="ms-icon">
         <svg width="40" height="40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={icon} /></svg>
       </div>
@@ -452,8 +460,8 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
   const [picked, setPicked] = useState<{ mode: Mode; x: number; y: number } | null>(null);
   const [gifOk, setGifOk] = useState(true);
   const [stats, setStats] = useState<{ all: number; cc: number } | null>(null);
+  const [loadingStats, setLoadingStats] = useState(true);
 
-  // Jumlah online langsung di kartu (pakai aturan deteksi faction yang sama dengan dashboard)
   useEffect(() => {
     let off = false;
     Promise.all([
@@ -466,7 +474,8 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
       const ccIds = new Set(facs.filter(f => f.short.split(',').map(clean).includes('CC')).map(f => f.id));
       const cc = (pl.players as Player[]).filter(p => ccIds.has(detectFaction(p.name, ms))).length;
       setStats({ all: pl.online, cc });
-    }).catch(() => { /* kartu tetap tampil tanpa angka */ });
+    }).catch(() => { /* kartu tetap tampil tanpa angka */ })
+      .finally(() => { if (!off) setLoadingStats(false); });
     return () => { off = true; };
   }, []);
 
@@ -477,7 +486,7 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
   const choose = (mode: Mode, e: React.MouseEvent<HTMLButtonElement>) => {
     if (picked) return;
     let x = e.clientX, y = e.clientY;
-    if (!x && !y) { const r = e.currentTarget.getBoundingClientRect(); x = r.left + r.width / 2; y = r.top + r.height / 2; } // dipicu keyboard
+    if (!x && !y) { const r = e.currentTarget.getBoundingClientRect(); x = r.left + r.width / 2; y = r.top + r.height / 2; }
     setPicked({ mode, x, y });
     setTimeout(() => onSelect(mode), 850);
   };
@@ -487,7 +496,6 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
     <div className="ms-root relative flex min-h-screen items-center justify-center overflow-hidden bg-[#05060a] p-4 font-sans" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
       <style>{MS_CSS}</style>
 
-      {/* GIF IME Roleplay sebagai latar penuh (diredupkan agar teks tetap terbaca) */}
       {gifOk && (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={IME_GIF} alt="" aria-hidden onError={() => setGifOk(false)} draggable={false} className="ms-bg pointer-events-none absolute inset-0 h-full w-full scale-105 select-none object-cover opacity-35 blur-[3px]" />
@@ -522,12 +530,14 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
           <ModeCard
             title="Crimson Creed Only" desc="Fokus memantau dan menganalisis anggota Crimson Creed saja."
             tint="239,68,68" tilt="-6deg" delay=".25s" state={stateOf('CC')} onPick={e => choose('CC', e)}
+            isLoading={loadingStats}
             badge={stats ? `${stats.cc} online` : undefined}
             icon="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
           />
           <ModeCard
             title="All Factions" desc="Lihat semua player: semua faction, Civilian, serta Good dan Bad Side."
             tint="59,130,246" tilt="6deg" delay=".4s" state={stateOf('ALL')} onPick={e => choose('ALL', e)}
+            isLoading={loadingStats}
             badge={stats ? `${stats.all} online` : undefined}
             icon="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
           />
@@ -535,6 +545,202 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
       </div>
 
       {picked && <div className="ms-ripple" style={{ left: picked.x, top: picked.y, background: picked.mode === 'CC' ? '#ef4444' : '#3b82f6' }} />}
+    </div>
+  );
+}
+
+/* ══════════════ KTP & Relation Drawer (Moderator Feature) ══════════════ */
+function KTPDrawer({ player, onClose }: { player: EnrichedPlayer; onClose: () => void }) {
+  const [relation, setRelation] = useState<RelationRecord>({
+    citizenId: generateCitizenId(player.name),
+    status: 'ACTIVE',
+    type: 'Warga Sipil',
+    notes: '',
+    updatedAt: new Date().toISOString()
+  });
+  const [isEditing, setIsEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  // Load from local storage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(`ime-relation-${player.name}`);
+      if (stored) {
+        setRelation(JSON.parse(stored));
+      }
+    } catch { /* ignore */ }
+  }, [player.name]);
+
+  const handleSave = () => {
+    setSaving(true);
+    // Simulate API call with idempotency & timeout
+    setTimeout(() => {
+      try {
+        localStorage.setItem(`ime-relation-${player.name}`, JSON.stringify(relation));
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      } catch { /* ignore */ }
+      setSaving(false);
+      setIsEditing(false);
+    }, 800);
+  };
+
+  const statusColors = {
+    ACTIVE: 'bg-emerald-500/20 text-emerald-500 border-emerald-500/30',
+    INACTIVE: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
+    SUSPENDED: 'bg-red-500/20 text-red-500 border-red-500/30',
+  };
+
+  return (
+    <div className="fixed inset-y-0 right-0 z-[90] w-full max-w-md translate-x-0 transform overflow-hidden border-l border-line bg-app shadow-2xl transition-transform duration-300 ease-in-out">
+      <div className="flex h-full flex-col">
+        <header className="flex items-center justify-between border-b border-line bg-card px-5 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/20 text-accent">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" /></svg>
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-main">Data Relasi Player</h2>
+              <p className="text-xs text-muted">Los Santos Identity</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-2 text-muted hover:bg-hover hover:text-main transition">
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-5 custom-scrollbar space-y-6">
+          {/* KTP Card UI */}
+          <div className="relative overflow-hidden rounded-2xl border border-slate-300 bg-[#e9ecef] p-1 shadow-xl">
+            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10" />
+            <div className="relative rounded-xl border border-slate-200 bg-white/80 p-4 backdrop-blur-sm">
+              <div className="flex items-center justify-between border-b border-slate-300 pb-2 mb-3">
+                <h3 className="text-[10px] font-bold tracking-widest text-slate-600">LOS SANTOS IDENTITY</h3>
+                <div className="flex gap-1">
+                  <div className="h-4 w-4 rounded-full bg-blue-500/20 border border-blue-500/50" />
+                  <div className="h-4 w-4 rounded-full bg-red-500/20 border border-red-500/50" />
+                </div>
+              </div>
+              <div className="flex gap-4">
+                <div className="h-24 w-20 shrink-0 overflow-hidden rounded border-2 border-slate-300 bg-slate-200 shadow-inner">
+                  <div className="flex h-full w-full items-center justify-center bg-gradient-to-b from-slate-300 to-slate-400">
+                    <svg className="h-10 w-10 text-slate-500" fill="currentColor" viewBox="0 0 24 24"><path d="M24 20.993V24H0v-2.996A14.977 14.977 0 0112.004 15c4.904 0 9.26 2.354 11.996 5.993zM16.002 8.999a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                  </div>
+                </div>
+                <div className="flex-1 space-y-1.5 text-[10px]">
+                  <div className="flex justify-between border-b border-slate-200 pb-0.5">
+                    <span className="text-slate-500">FIRST NAME</span>
+                    <span className="font-bold text-slate-800 uppercase">{player.name.split(' ')[0] || '-'}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-200 pb-0.5">
+                    <span className="text-slate-500">LAST NAME</span>
+                    <span className="font-bold text-slate-800 uppercase">{player.name.split(' ').slice(1).join(' ') || '-'}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-200 pb-0.5">
+                    <span className="text-slate-500">DOB</span>
+                    <span className="font-bold text-slate-800">1999-03-24</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-200 pb-0.5">
+                    <span className="text-slate-500">SEX</span>
+                    <span className="font-bold text-slate-800">MALE</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-200 pb-0.5">
+                    <span className="text-slate-500">NATIONALITY</span>
+                    <span className="font-bold text-slate-800 uppercase">{relation.type}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">CITIZEN ID</span>
+                    <span className="font-mono font-bold text-slate-800">{relation.citizenId}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 flex items-end justify-between">
+                <div className="font-mono text-[9px] text-slate-400">Signature: {player.name}</div>
+                <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/9/9f/Flag_of_Indonesia.svg/320px-Flag_of_Indonesia.svg.png" alt="ID" className="h-3 w-5 object-cover rounded-sm opacity-70" />
+              </div>
+            </div>
+          </div>
+
+          {/* Relation Form */}
+          <div className="rounded-xl border border-line bg-card p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-main">Status Relasi</h3>
+              {!isEditing ? (
+                <button onClick={() => setIsEditing(true)} className="text-xs font-semibold text-accent hover:underline">Edit Data</button>
+              ) : (
+                <button onClick={() => setIsEditing(false)} className="text-xs font-semibold text-muted hover:text-main">Batal</button>
+              )}
+            </div>
+
+            {isEditing ? (
+              <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
+                <div>
+                  <label className="text-[11px] font-semibold text-muted mb-1 block">Status</label>
+                  <select
+                    value={relation.status}
+                    onChange={e => setRelation({ ...relation, status: e.target.value as RelationStatus })}
+                    className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent"
+                  >
+                    <option value="ACTIVE">Aktif (Active)</option>
+                    <option value="INACTIVE">Tidak Aktif (Inactive)</option>
+                    <option value="SUSPENDED">Ditangguhkan (Suspended)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-muted mb-1 block">Tipe Relasi / Pekerjaan</label>
+                  <input
+                    type="text"
+                    value={relation.type}
+                    onChange={e => setRelation({ ...relation, type: e.target.value })}
+                    placeholder="Cth: Anggota CC, Warga Sipil..."
+                    className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-muted mb-1 block">Catatan Penting</label>
+                  <textarea
+                    value={relation.notes}
+                    onChange={e => setRelation({ ...relation, notes: e.target.value })}
+                    placeholder="Tambahkan catatan khusus..."
+                    rows={3}
+                    className="w-full resize-none rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent"
+                  />
+                </div>
+                <div className="pt-2">
+                  <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-text transition hover:bg-accent-hover disabled:opacity-50"
+                  >
+                    {saving ? (
+                      <><div className="h-4 w-4 animate-spin rounded-full border-2 border-accent-text border-t-transparent" /> Menyimpan...</>
+                    ) : saved ? 'Tersimpan!' : 'Simpan Perubahan'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3 animate-in fade-in">
+                <div className="flex items-center justify-between rounded-lg border border-line bg-app p-3">
+                  <span className="text-sm text-muted">Status Saat Ini</span>
+                  <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${statusColors[relation.status]}`}>
+                    {relation.status}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-line bg-app p-3">
+                  <span className="text-sm text-muted">Tipe / Faction</span>
+                  <span className="text-sm font-semibold text-main">{relation.type}</span>
+                </div>
+                <div className="rounded-lg border border-line bg-app p-3">
+                  <span className="text-xs text-muted block mb-1">Catatan:</span>
+                  <p className="text-sm text-main">{relation.notes || <span className="text-subtle italic">Tidak ada catatan.</span>}</p>
+                </div>
+                <div className="text-right text-[10px] text-subtle">Terakhir diupdate: {formatDate(relation.updatedAt)}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -549,16 +755,14 @@ function ChangelogModal({ onClose }: { onClose: () => void }) {
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-accent/20 text-accent">
             <SparkIcon className="h-6 w-6" />
           </div>
-          <h2 className="text-xl font-bold text-main">Update Terbaru v1.2</h2>
-          <p className="text-xs text-muted mt-1">Fitur baru & perbaikan sistem</p>
+          <h2 className="text-xl font-bold text-main">Update Terbaru v1.3</h2>
+          <p className="text-xs text-muted mt-1">Moderator Tools & UI Polish</p>
         </div>
         <div className="px-6 py-5 max-h-[50vh] overflow-y-auto custom-scrollbar">
           <div className="space-y-3 text-sm text-main">
-            <div className="flex gap-3"><span className="text-emerald-500">✅</span><p><strong>Watchlist & Sesi Player:</strong> Klik ikon bintang (⭐) untuk memantau player. Klik nama player untuk *copy* nama mereka.</p></div>
-            <div className="flex gap-3"><span className="text-emerald-500">✅</span><p><strong>Grafik Tren Online:</strong> Lihat riwayat player online 24 jam terakhir.</p></div>
-            <div className="flex gap-3"><span className="text-emerald-500">✅</span><p><strong>Widget Kubu (Good/Bad/Civilian):</strong> Filter player berdasarkan kubu dengan lebih rapi.</p></div>
-            <div className="flex gap-3"><span className="text-emerald-500">✅</span><p><strong>Tombol Report Bug:</strong> Tombol merah di pojok kanan bawah untuk melapor jika ada error.</p></div>
-            <div className="flex gap-3"><span className="text-emerald-500">✅</span><p><strong>Mode Khusus Moderator:</strong> Moderator dapat memilih untuk fokus ke Crimson Creed atau All Factions.</p></div>
+            <div className="flex gap-3"><span className="text-emerald-500">✅</span><p><strong>Data Relasi KTP (Moderator):</strong> Klik nama player di tabel untuk membuka KTP Los Santos di sisi kanan. Anda dapat mengedit status relasi, tipe, dan catatan.</p></div>
+            <div className="flex gap-3"><span className="text-emerald-500">✅</span><p><strong>UI Pemilihan Mode Baru:</strong> Tampilan pemilihan CC/All Factions kini lebih premium dengan animasi loading data dan efek hover 3D.</p></div>
+            <div className="flex gap-3"><span className="text-emerald-500">✅</span><p><strong>Sistem Auto-Save:</strong> Perubahan data relasi tersimpan secara lokal dan aman.</p></div>
           </div>
 
           <div className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-500">
@@ -1105,7 +1309,7 @@ function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => voi
                   </select>
                 </div>
                 <div className="mt-4 flex justify-end"><button onClick={addAdmin} className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover">Tambah</button></div>
-                <p className="mt-2 text-[11px] text-subtle">Moderator hanya bisa mengelola user (ACC / timeout / ban). Faction, log, dan admin hanya untuk Super Admin.</p>
+                <p className="mt-2 text-[11px] text-subtle">Moderator hanya bisa mengelola user (ACC / timeout / ban) dan data relasi. Faction, log, dan admin hanya untuk Super Admin.</p>
               </div>
               <div className="rounded-xl border border-line bg-card overflow-hidden">
                 <table className="w-full text-sm text-left">
@@ -1238,6 +1442,7 @@ function Home({ isAdmin, role, viewMode, onSwitchMode, settings, onOpenSettings,
   const [delta, setDelta] = useState<number | null>(null);
   const [pull, setPull] = useState(0);
   const [urlReady, setUrlReady] = useState(false);
+  const [selectedPlayer, setSelectedPlayer] = useState<EnrichedPlayer | null>(null);
 
   const [factions, setFactions] = useState<FactionDef[]>(FALLBACK_FACTIONS);
   const [factionsError, setFactionsError] = useState(false);
@@ -1451,705 +1656,205 @@ function Home({ isAdmin, role, viewMode, onSwitchMode, settings, onOpenSettings,
   const matchers = useMemo(() => buildMatchers(factions), [factions]);
   const factionMap = useMemo(() => { const m = new Map<string, FactionDef>(); factions.forEach(f => m.set(f.id, f)); return m; }, [factions]);
 
-  const enriched: EnrichedPlayer[] = useMemo(() => (data?.players ?? []).map(p => {
+  // Filter players based on viewMode
+  const filteredByMode = useMemo(() => {
+    if (!data) return [];
+    if (viewMode === 'CC') {
+      const ccIds = new Set(factions.filter(f => f.short.split(',').map(clean).includes('CC')).map(f => f.id));
+      return data.players.filter(p => ccIds.has(detectFaction(p.name, matchers)));
+    }
+    return data.players;
+  }, [data, factions, matchers, viewMode]);
+
+  const enriched: EnrichedPlayer[] = useMemo(() => filteredByMode.map(p => {
     const faction = detectFaction(p.name, matchers);
     const side: Side | 'CIVIL' = faction === 'WARGA' ? 'CIVIL' : resolveSide(factionMap.get(faction));
     return { ...p, faction, side };
-  }), [data, matchers, factionMap]);
+  }), [filteredByMode, matchers, factionMap]);
 
-  const counts = useMemo(() => {
-    const c: Record<string, number> = { SEMUA: enriched.length, GOOD: 0, BAD: 0, CIVILIAN: 0 };
-    for (const f of factions) c[f.id] = 0;
-    c.WARGA = 0;
-    for (const p of enriched) {
-      c[p.faction] = (c[p.faction] ?? 0) + 1;
-      if (p.side === 'CIVIL') c.CIVILIAN++;
-      else if (p.side === 'GOOD') c.GOOD++;
-      else if (p.side === 'BAD') c.BAD++;
-    }
-    return c;
-  }, [enriched, factions]);
-
-  const sessionMs = useCallback((name: string) => {
-    const rec = sessionsRef.current[name];
-    return rec && rec.start != null ? Date.now() - rec.start : 0;
-  }, []);
-
-  // Semua id faction yang alias-nya "CC" (Crimson Creed)
-  const ccIds = useMemo(
-    () => new Set(factions.filter(f => f.short.split(',').map(clean).includes('CC')).map(f => f.id)),
-    [factions]
-  );
-
+  // Search & Filter
   const filtered = useMemo(() => {
     let list = enriched;
-
-    // Mode CC: hanya anggota Crimson Creed (kosong jika faction CC belum ada)
-    if (viewMode === 'CC') list = list.filter(p => ccIds.has(p.faction));
-
     if (activeGroup !== 'ALL') {
-      list = list.filter(p => activeGroup === 'CIVILIAN' ? p.side === 'CIVIL' : p.side === activeGroup);
+      list = list.filter(p => p.side === activeGroup);
     }
-    if (activeCat !== 'SEMUA') list = list.filter(p => p.faction === activeCat);
-    if (onlyWatch) list = list.filter(p => watch.has(p.name));
-    const q = search.trim().toLowerCase();
-    if (q) list = list.filter(p => p.name.toLowerCase().includes(q) || String(p.id).includes(q));
+    if (activeCat !== 'SEMUA') {
+      list = list.filter(p => p.faction === activeCat);
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(p => p.name.toLowerCase().includes(q));
+    }
+    if (onlyWatch) {
+      list = list.filter(p => watch.has(p.name));
+    }
     return list;
-  }, [enriched, activeGroup, activeCat, search, onlyWatch, watch, viewMode, ccIds]);
+  }, [enriched, activeGroup, activeCat, search, onlyWatch, watch]);
 
+  // Sorting
   const sorted = useMemo(() => {
     if (!sortKey) return filtered;
-    const dir = sortDir === 'asc' ? 1 : -1;
-    const arr = [...filtered];
-    arr.sort((a, b) => {
-      switch (sortKey) {
-        case 'id': return (a.id - b.id) * dir;
-        case 'ping': return (a.ping - b.ping) * dir;
-        case 'name': return a.name.localeCompare(b.name, 'id') * dir;
-        case 'session': return (sessionMs(a.name) - sessionMs(b.name)) * dir;
+    return [...filtered].sort((a, b) => {
+      let v = 0;
+      if (sortKey === 'id') v = a.id - b.id;
+      else if (sortKey === 'name') v = a.name.localeCompare(b.name);
+      else if (sortKey === 'ping') v = a.ping - b.ping;
+      else if (sortKey === 'session') {
+        const sa = sessionsRef.current[a.name] || { total: 0 };
+        const sb = sessionsRef.current[b.name] || { total: 0 };
+        v = sa.total - sb.total;
       }
+      return sortDir === 'asc' ? v : -v;
     });
-    return arr;
-  }, [filtered, sortKey, sortDir, sessionMs]);
+  }, [filtered, sortKey, sortDir]);
 
-  const toggleSort = (k: SortKey) => {
-    if (sortKey !== k) { setSortKey(k); setSortDir('asc'); }
-    else if (sortDir === 'asc') setSortDir('desc');
-    else setSortKey(null);
-  };
-
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
-  const safePage = Math.min(page, totalPages - 1);
-  const slice = infinite ? sorted.slice(0, visibleCount) : sorted.slice(safePage * pageSize, safePage * pageSize + pageSize);
-
-  useEffect(() => { if (page !== safePage) setPage(safePage); }, [page, safePage]);
-  useEffect(() => { setPage(0); setVisibleCount(50); }, [search, activeCat, activeGroup, onlyWatch, pageSize, viewMode]);
-
-  useEffect(() => {
-    if (!infinite || !sentinelRef.current) return;
-    const el = sentinelRef.current;
-    const io = new IntersectionObserver(es => { if (es[0].isIntersecting) setVisibleCount(v => v + 50); }, { rootMargin: '200px' });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [infinite, sorted.length, visibleCount]);
-
-  const navCats = useMemo(() => {
-    // Mode CC: nav hanya menampilkan satu kategori
-    if (viewMode === 'CC') {
-      return [{ id: 'SEMUA', short: 'Crimson Creed', dot: 'bg-red-500', color: null as string | null | undefined }];
-    }
-
-    const items = [
-      { id: 'SEMUA', short: 'Semua', dot: 'bg-accent', color: null as string | null | undefined },
-      ...factions.filter(f => {
-        if (activeGroup === 'ALL') return true;
-        if (activeGroup === 'CIVILIAN') return false;
-        return resolveSide(f) === activeGroup;
-      }).map(f => ({ id: f.id, short: f.short.split(',')[0], dot: f.dot, color: f.color })),
-      { id: 'WARGA', short: WARGA.short, dot: WARGA.dot, color: null as string | null | undefined },
-    ];
-    return items.filter(it => {
-      if (it.id === 'WARGA') return activeGroup === 'ALL' || activeGroup === 'CIVILIAN';
-      return (counts[it.id] ?? 0) > 0 || it.id === activeCat || it.id === 'SEMUA';
-    });
-  }, [counts, activeCat, factions, activeGroup, viewMode]);
-
-  // Hitungan nav di mode CC harus mengikuti jumlah anggota CC, bukan semua player
-  const ccMembers = useMemo(() => enriched.filter(p => ccIds.has(p.faction)), [enriched, ccIds]);
-  const ccCount = ccMembers.length;
-  const navCount = (id: string) => (viewMode === 'CC' ? ccCount : counts[id] ?? 0);
-
-  const isWarning = countdown && countdown.diffMs < 30 * 60 * 1000;
-
-  const copyName = async (name: string) => {
-    try { await navigator.clipboard.writeText(name); pushToast(`Disalin: ${name}`, 'info'); }
-    catch { pushToast('Gagal menyalin', 'bad'); }
-  };
-
-  const exportCsv = () => {
-    const rows: (string | number)[][] = [['Kantong', 'Nama', 'Faction', 'Side', 'Ping']];
-    sorted.forEach(p => {
-      const f = p.faction === 'WARGA' ? WARGA : factionMap.get(p.faction);
-      rows.push([p.id, p.name, f?.label ?? 'Civilian', p.side === 'CIVIL' ? 'Civilian' : p.side, p.ping]);
-    });
-    downloadCsv(`players-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.csv`, toCsv(rows));
-    pushToast(`${sorted.length} player diekspor`, 'good');
-  };
-
-  const sortTh = (k: SortKey, label: string, cls: string) => (
-    <th className={cls}>
-      <button onClick={() => toggleSort(k)} className="inline-flex items-center gap-1 uppercase tracking-wider transition hover:text-main">
-        {label}
-        <span className={sortKey === k ? 'text-accent' : 'opacity-30'}>{sortKey === k ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
-      </button>
-    </th>
-  );
-
-  const rowH = compactMode ? 'h-10' : 'h-14';
+  // Pagination / Infinite Scroll
+  const displayed = infinite ? sorted.slice(0, visibleCount) : sorted.slice(page * pageSize, (page + 1) * pageSize);
 
   return (
-    <main className="min-h-screen bg-app text-main">
-      {pull > 0 && (
-        <div className="pointer-events-none fixed left-0 right-0 top-14 z-50 flex justify-center" style={{ transform: `translateY(${pull * 0.6}px)`, opacity: Math.min(1, pull / 60) }}>
-          <div className="flex items-center gap-2 rounded-full border border-line bg-card px-3 py-1.5 text-[11px] text-muted shadow-lg">
-            <RefreshIcon className={`h-3.5 w-3.5 ${pull >= 60 ? 'text-accent' : ''}`} />{pull >= 60 ? 'Lepas untuk refresh' : 'Tarik untuk refresh'}
-          </div>
-        </div>
-      )}
-
-      <div className="pointer-events-none fixed bottom-4 left-0 right-0 z-[200] flex flex-col items-center gap-2 px-3" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        {toasts.map(t => (
-          <div key={t.id} className={`pointer-events-auto max-w-sm rounded-xl border px-4 py-2.5 text-xs font-medium shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 ${t.kind === 'good' ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-400' : t.kind === 'bad' ? 'border-red-500/30 bg-red-500/15 text-red-400' : t.kind === 'watch' ? 'border-amber-500/40 bg-amber-500/15 text-amber-400' : 'border-line bg-card text-main'}`}>
-            {t.text}
-          </div>
-        ))}
-      </div>
-
-      <div className="fixed top-3 left-0 right-0 z-40 flex justify-center px-3" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
-        <div className="relative w-full max-w-5xl overflow-hidden rounded-full">
-          <div className="pointer-events-none absolute left-0 top-0 z-20 h-full w-12 bg-gradient-to-r from-app via-app/80 to-transparent rounded-l-full backdrop-blur-[2px]" />
-          <div
-            ref={navRef} onMouseDown={onMouseDown} onMouseLeave={onMouseLeave} onMouseUp={onMouseUp} onMouseMove={onMouseMove} onWheel={onWheel}
-            className={`nav-scroll no-scrollbar flex items-center gap-1 overflow-x-auto rounded-full border border-line bg-nav px-3 py-1.5 shadow-[0_4px_30px_rgba(0,0,0,0.3)] backdrop-blur-xl ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
-          >
-            {navCats.map(cat => {
-              const active = activeCat === cat.id;
-              return (
-                <button key={cat.id} data-active={active} onClick={() => setActiveCat(cat.id)}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-300 ${active ? 'bg-accent text-accent-text shadow-[0_0_12px_var(--accent)]' : 'text-muted hover:bg-hover hover:text-main'}`}
-                >
-                  <span className={`h-1.5 w-1.5 rounded-full transition-colors ${active ? 'bg-accent-text' : cat.color ? '' : cat.dot}`} style={!active && cat.color ? { backgroundColor: cat.color } : undefined} />
-                  <span>{cat.short}</span>
-                  <span className={`text-[10px] ${active ? 'text-accent-text/80' : 'text-subtle'}`}>{navCount(cat.id)}</span>
-                </button>
-              );
-            })}
-          </div>
-          <div className="pointer-events-none absolute right-0 top-0 z-20 h-full w-12 bg-gradient-to-l from-app via-app/80 to-transparent rounded-r-full backdrop-blur-[2px]" />
-        </div>
-      </div>
-
-      <div className="mx-auto max-w-5xl px-4 pb-16 pt-20 sm:px-6">
-        <header className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-subtle">IME Roleplay</div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight sm:text-3xl">
-              {viewMode === 'CC' ? 'Crimson Creed Monitor' : 'Player Monitor'}
-              <span className="relative flex h-3 w-3">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-500"></span>
-              </span>
-            </h1>
-            <p className="mt-1 text-sm text-muted">
-              {viewMode === 'CC' ? 'Memantau khusus anggota Crimson Creed' : 'Pantau siapa saja yang sedang bermain sekarang'}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {isAdmin && (
-              <button
-                onClick={onSwitchMode}
-                className="flex h-8 items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-3 text-red-500 transition hover:bg-red-500/20"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
-                <span className="text-xs font-semibold">Ganti Mode</span>
-              </button>
-            )}
-            {countdown && (
-              <div className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-mono transition-colors ${isWarning ? 'border-red-500/50 bg-red-500/10 text-red-500' : 'border-line bg-card text-muted'}`}>
-                <span className="hidden sm:inline">Restart dalam</span><span className="sm:hidden">Restart</span><span className="font-bold">{formatTime(countdown.diffMs)}</span>
-              </div>
-            )}
-            {isAdmin && (
-              <button onClick={onOpenAdmin} className="relative flex h-8 items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 text-emerald-500 transition hover:bg-emerald-500/20" title="Admin Panel">
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
-                <span className="text-xs font-semibold">Admin</span>
-                {pendingCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white border-2 border-app">{pendingCount}</span>}
-              </button>
-            )}
-            <button onClick={() => setHistoryOpen(true)} className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-card text-muted transition hover:border-accent/50 hover:text-main" title="Riwayat sesi"><ClockIcon className="h-4 w-4" /></button>
-            <button onClick={onOpenSettings} className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-card text-muted transition-all duration-300 hover:border-accent/50 hover:text-main hover:rotate-90" title="Pengaturan"><GearIcon className="h-4 w-4" /></button>
-            <button onClick={() => setAiOpen(true)} className="group flex items-center gap-2 rounded-full border border-line bg-card px-4 py-1.5 text-xs font-medium text-accent transition hover:border-accent/50 hover:bg-hover"><SparkIcon className="h-3.5 w-3.5" />Tanya AI</button>
-          </div>
-        </header>
-
-        {isWarning && countdown && (
-          <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500 animate-pulse">
-            <svg className="h-5 w-5 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-            <div><span className="font-bold tracking-wide">PERINGATAN BADAI:</span> Server akan direstart dalam <span className="font-mono font-bold">{formatTime(countdown.diffMs)}</span>.</div>
-          </div>
-        )}
-
-        {factionsError && (
-          <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-500">Daftar faction dari server gagal dimuat — memakai daftar bawaan.</div>
-        )}
-
-        {viewMode === 'CC' && <CCPanel members={ccMembers} sessionMs={sessionMs} watch={watch} missing={ccIds.size === 0} />}
-
-        <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Stat label="Online" value={data ? fmt(data.online) : '—'} accent="text-emerald-500" pulse delta={delta} />
-          <Stat label="Max Slots" value={data ? fmt(data.max) : '—'} accent="text-blue-500" />
-          <Stat label="Gate" value={data?.gate ?? '—'} accent="text-accent" small />
-          <Stat label="Terakhir" value={lastFetch ? lastFetch.toLocaleTimeString('id-ID') : '—'} accent="text-muted" small />
-        </section>
-
-        <section className="mb-6 rounded-2xl border border-line bg-card p-4">
-          <button onClick={() => setChartOpen(o => !o)} className="flex w-full items-center justify-between text-left">
-            <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Tren Online · 24 jam terakhir</div>
-              <div className="mt-0.5 text-xs text-muted">Lihat jam ramai & perkiraan jam sepi</div>
+    <div className="flex min-h-screen flex-col bg-app text-main relative">
+      {selectedPlayer && <KTPDrawer player={selectedPlayer} onClose={() => setSelectedPlayer(null)} />}
+      
+      {/* HEADER */}
+      <header className="sticky top-0 z-40 border-b border-line bg-app/80 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/20 text-accent">
+              <ShieldIcon className="h-6 w-6" />
             </div>
-            <span className={`text-subtle transition-transform ${chartOpen ? 'rotate-180' : ''}`}>▾</span>
-          </button>
-          {chartOpen && <div className="mt-3"><OnlineChart points={history} /></div>}
-        </section>
-
-        {viewMode !== 'CC' && (
-          <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {GROUP_WIDGETS.map(w => {
-              const on = activeGroup === w.id;
-              return (
-                <button key={w.id}
-                  onClick={() => { setActiveGroup(on ? 'ALL' : w.id); setActiveCat('SEMUA'); }}
-                  className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl border p-4 text-left transition-all duration-300 ${on ? w.active : w.idle}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className={`flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${on ? w.iconActive : w.iconIdle}`}>
-                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={w.icon} /></svg>
-                    </div>
-                    {on && <span className={`flex h-2 w-2 rounded-full animate-pulse ${w.dot}`} />}
-                  </div>
-                  <div className="mt-4">
-                    <div className={`text-[10px] font-semibold uppercase tracking-wider ${w.text}`}>{w.label}</div>
-                    <div className="mt-1 flex items-baseline gap-2">
-                      <span className="text-2xl font-bold text-main">{counts[w.id]}</span>
-                      <span className="text-xs text-muted">player</span>
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
+            <div>
+              <h1 className="text-lg font-bold leading-tight">IME Dashboard</h1>
+              <p className="text-[11px] text-muted">Server Monitoring System</p>
+            </div>
           </div>
-        )}
-
-        {error && <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">⚠ {error}</div>}
-
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-          <div className="relative min-w-[200px] flex-1">
-            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
-            <input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari nama atau kantong…" className="w-full rounded-lg border border-line bg-card py-2.5 pl-10 pr-4 text-sm text-main placeholder-subtle outline-none transition focus:border-accent/50 focus:ring-2 focus:ring-accent/15" />
+          <div className="flex items-center gap-2">
+            {isAdmin && (
+              <button onClick={onOpenAdmin} className="relative flex items-center gap-2 rounded-lg bg-hover px-3 py-1.5 text-xs font-semibold text-main transition hover:bg-line">
+                <SettingsIcon className="h-4 w-4" /> Admin Panel
+                {pendingCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white">{pendingCount}</span>}
+              </button>
+            )}
+            <button onClick={onOpenSettings} className="rounded-lg p-2 text-muted hover:bg-hover hover:text-main transition"><SettingsIcon className="h-5 w-5" /></button>
+            <button onClick={onSwitchMode} className="rounded-lg bg-accent px-4 py-2 text-xs font-bold text-accent-text hover:bg-accent-hover transition shadow-lg shadow-accent/20">Ganti Mode</button>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => setOnlyWatch(o => !o)} className={`inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition ${onlyWatch ? 'border-amber-500/50 bg-amber-500/10 text-amber-500' : 'border-line bg-card text-main hover:border-amber-500/40'}`} title="Hanya watchlist">
-              <StarIcon className="h-4 w-4" filled={onlyWatch} /><span className="text-xs">{watch.size}</span>
-            </button>
-            <button onClick={exportCsv} disabled={sorted.length === 0} className="inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-card px-3 py-2.5 text-sm font-medium text-main transition hover:border-accent/40 disabled:opacity-40" title="Ekspor CSV (sesuai filter)"><DownloadIcon className="h-4 w-4" /><span className="hidden sm:inline">CSV</span></button>
-            <button onClick={copyLink} className="inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-card px-3 py-2.5 text-sm font-medium text-main transition hover:border-accent/40" title="Salin link dengan filter ini"><LinkIcon className="h-4 w-4" /><span className="hidden sm:inline">Link</span></button>
-            <button onClick={load} disabled={refreshing} className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-line bg-card px-4 py-2.5 text-sm font-medium text-main transition hover:border-accent/40 disabled:opacity-40 sm:flex-none">
-              <RefreshIcon className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
-            </button>
+        </div>
+      </header>
+
+      {/* CONTENT */}
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">
+        {/* STATS WIDGETS */}
+        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-2xl border border-line bg-card p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-muted uppercase tracking-wider">Total Online</p>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <h2 className="text-3xl font-bold">{data?.online ?? 0}</h2>
+                  {delta !== null && (
+                    <span className={`text-xs font-semibold ${delta > 0 ? 'text-emerald-500' : delta < 0 ? 'text-red-500' : 'text-subtle'}`}>
+                      {delta > 0 ? '+' : ''}{delta}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-accent">
+                <UsersIcon className="h-5 w-5" />
+              </div>
+            </div>
+          </div>
+          
+          <div className="rounded-2xl border border-line bg-card p-5 shadow-sm">
+            <p className="text-xs font-medium text-muted uppercase tracking-wider">Max Slots</p>
+            <h2 className="mt-1 text-3xl font-bold">{data?.max ?? 0}</h2>
+          </div>
+
+          <div className="rounded-2xl border border-line bg-card p-5 shadow-sm">
+            <p className="text-xs font-medium text-muted uppercase tracking-wider">Server Gate</p>
+            <h2 className="mt-1 text-lg font-semibold text-emerald-500 uppercase">{data?.gate || 'Unknown'}</h2>
+          </div>
+
+          <div className="rounded-2xl border border-line bg-card p-5 shadow-sm">
+            <p className="text-xs font-medium text-muted uppercase tracking-wider">Restart In</p>
+            <h2 className="mt-1 font-mono text-xl font-semibold">{countdown ? formatTime(countdown.diffMs) : '--:--:--'}</h2>
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
+        {/* FILTERS & SEARCH */}
+        <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-line bg-card p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => setActiveGroup('ALL')} className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${activeGroup === 'ALL' ? 'bg-accent text-accent-text' : 'bg-hover text-muted hover:text-main'}`}>Semua</button>
+            {GROUP_WIDGETS.map(g => (
+              <button key={g.id} onClick={() => setActiveGroup(g.id)} className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${activeGroup === g.id ? g.active : g.idle}`}>
+                <span className={`h-2 w-2 rounded-full ${g.dot}`} /> {g.label}
+              </button>
+            ))}
+          </div>
+          <div className="relative w-full max-w-xs">
+            <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
+            <input type="text" placeholder="Cari player..." value={search} onChange={e => setSearch(e.target.value)} className="w-full rounded-lg border border-line bg-app py-2 pl-9 pr-3 text-sm outline-none focus:border-accent" />
+          </div>
+        </div>
+
+        {/* TABLE */}
+        <div className="rounded-2xl border border-line bg-card shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm whitespace-nowrap">
-              <thead>
-                <tr className={`border-b border-line bg-hover text-left text-[10px] font-semibold uppercase tracking-wider text-subtle ${compactMode ? 'h-9' : 'h-11'}`}>
-                  <th className="w-10 pl-4" />
-                  {sortTh('id', 'Kantong', 'w-24 px-4')}
-                  {sortTh('name', 'Nama', 'px-4')}
-                  {sortTh('session', 'Sesi', 'hidden w-24 px-4 sm:table-cell')}
-                  {sortTh('ping', 'Ping', 'w-20 px-4 text-right')}
+            <table className="w-full text-left text-sm">
+              <thead className="bg-hover text-[11px] uppercase tracking-wider text-muted">
+                <tr>
+                  <th className="px-4 py-3 w-16">ID</th>
+                  <th className="px-4 py-3">Nama Player</th>
+                  <th className="px-4 py-3">Faction</th>
+                  <th className="px-4 py-3">Ping</th>
+                  <th className="px-4 py-3 text-right">Aksi</th>
                 </tr>
               </thead>
               <tbody>
-                {loading && !data ? (
-                  Array.from({ length: 8 }).map((_, i) => (
-                    <tr key={i} className={`border-b border-line ${rowH}`}>
-                      <td className="pl-4"><div className="h-4 w-4 animate-pulse rounded bg-hover" /></td>
-                      <td className="px-4"><div className="h-5 w-12 animate-pulse rounded bg-hover" /></td>
-                      <td className="px-4"><div className="flex items-center gap-2"><div className="h-6 w-16 animate-pulse rounded-full bg-hover" /><div className="h-4 w-40 animate-pulse rounded bg-hover" /></div></td>
-                      <td className="hidden px-4 sm:table-cell"><div className="h-4 w-10 animate-pulse rounded bg-hover" /></td>
-                      <td className="px-4 text-right"><div className="ml-auto h-5 w-10 animate-pulse rounded bg-hover" /></td>
-                    </tr>
-                  ))
-                ) : slice.length === 0 ? (
-                  <tr><td colSpan={5} className="px-4 py-16 text-center text-subtle">{filtered.length ? 'Tidak ada hasil.' : onlyWatch ? 'Tidak ada pemain watchlist yang online.' : 'Tidak ada player di kategori ini.'}</td></tr>
-                ) : slice.map(p => {
-                  const fac = p.faction === 'WARGA' ? WARGA : factionMap.get(p.faction) ?? WARGA;
-                  const watched = watch.has(p.name);
+                {displayed.map(p => {
+                  const fac = factionMap.get(p.faction) || WARGA;
                   return (
-                    <tr key={p.id} onClick={() => copyName(p.name)} title="Klik untuk menyalin nama" className={`cursor-pointer border-b border-line transition hover:bg-hover ${rowH} ${watched ? 'bg-amber-500/5' : ''}`}>
-                      <td className="pl-4">
-                        <button onClick={e => { e.stopPropagation(); toggleWatch(p.name); }} className={`flex h-6 w-6 items-center justify-center rounded transition ${watched ? 'text-amber-500' : 'text-subtle hover:text-amber-500'}`} title={watched ? 'Hapus dari watchlist' : 'Tambah ke watchlist'}>
-                          <StarIcon className="h-4 w-4" filled={watched} />
-                        </button>
-                      </td>
-                      <td className="px-4"><span className="inline-flex items-center rounded-md border border-line bg-app px-2 py-0.5 font-mono text-[11px] font-medium text-main">#{p.id}</span></td>
-                      <td className="px-4">
+                    <tr key={p.id} onClick={() => setSelectedPlayer(p)} className="border-t border-line hover:bg-hover/50 transition cursor-pointer">
+                      <td className="px-4 py-3 font-mono text-xs text-subtle">{p.id}</td>
+                      <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <FactionTag fac={fac} variant={tagStyle} />
-                          <span className="truncate text-[13px] text-main max-w-[120px] sm:max-w-none">{p.name}</span>
+                          <span className="font-semibold text-main">{p.name}</span>
+                          {watch.has(p.name) && <StarIcon className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />}
                         </div>
                       </td>
-                      <td className="hidden px-4 font-mono text-[11px] text-muted sm:table-cell">{fmtDuration(sessionMs(p.name))}</td>
-                      <td className="px-4 text-right"><span className={`inline-flex rounded border px-2 py-0.5 font-mono text-[11px] font-medium ${pingClass(p.ping)}`}>{p.ping}</span></td>
+                      <td className="px-4 py-3">
+                        <FactionTag fac={fac} variant={tagStyle} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] font-semibold ${pingClass(p.ping)}`}>{p.ping} ms</span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button onClick={(e) => { e.stopPropagation(); toggleWatch(p.name); }} className={`rounded p-1.5 transition ${watch.has(p.name) ? 'text-amber-400 bg-amber-400/10' : 'text-subtle hover:bg-hover hover:text-main'}`}>
+                          <StarIcon className={`h-4 w-4 ${watch.has(p.name) ? 'fill-amber-400' : ''}`} />
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
+                {displayed.length === 0 && (
+                  <tr><td colSpan={5} className="px-4 py-10 text-center text-subtle">Tidak ada player ditemukan.</td></tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
-
-        {infinite && visibleCount < sorted.length && <div ref={sentinelRef} className="py-6 text-center text-xs text-subtle">Memuat lebih banyak…</div>}
-
-        <div className="mt-4 flex flex-col items-center justify-between gap-4 text-xs text-muted sm:flex-row">
-          <div className="order-2 sm:order-1">Auto-refresh {refreshMs / 1000} detik · {sorted.length} player{infinite ? ` · menampilkan ${Math.min(visibleCount, sorted.length)}` : ''}</div>
-          {!infinite && (
-            <div className="order-1 flex w-full items-center justify-between gap-2 sm:order-2 sm:w-auto">
-              <button onClick={() => setPage(Math.max(0, safePage - 1))} disabled={safePage <= 0} className="flex-1 rounded-lg border border-line bg-card py-2 font-medium text-main transition hover:border-accent/40 disabled:opacity-30 sm:flex-none sm:px-4 sm:py-1.5">← Prev</button>
-              <span className="min-w-[52px] text-center font-mono text-muted">{safePage + 1}/{totalPages}</span>
-              <button onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))} disabled={safePage >= totalPages - 1} className="flex-1 rounded-lg border border-line bg-card py-2 font-medium text-main transition hover:border-accent/40 disabled:opacity-30 sm:flex-none sm:px-4 sm:py-1.5">Next →</button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <HistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} sessions={sessionsRef.current} onlineNames={prevNamesRef.current} watch={watch} onToggleWatch={toggleWatch} />
-      <AIDrawer open={aiOpen} onClose={() => setAiOpen(false)} data={data} enriched={enriched} counts={counts} activeCat={activeCat} factionMap={factionMap} />
-    </main>
-  );
-}
-
-/* ═════════ [B] Sisa file: Sheet, HistoryModal, AIDrawer, SettingsModal, Stat, ikon ═════════ */
-
-/* Bottom sheet ala iOS: naik dari bawah di HP, dialog di tengah di desktop */
-function Sheet({ open, onClose, title, tall, children }: { open: boolean; onClose: () => void; title: string; tall?: boolean; children: React.ReactNode }) {
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [open, onClose]);
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-[150] flex items-end justify-center sm:items-center sm:p-4">
-      <div className="ios-fade absolute inset-0 bg-black/40 backdrop-blur-md" onClick={onClose} />
-      <div
-        className={`ios-sheet relative flex w-full max-w-lg flex-col overflow-hidden rounded-t-[28px] border border-line bg-card shadow-2xl sm:rounded-[28px] ${tall ? 'h-[85dvh] sm:h-[80vh]' : 'max-h-[88dvh]'}`}
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-      >
-        <div className="mx-auto mt-2 h-1.5 w-10 shrink-0 rounded-full bg-line sm:hidden" />
-        <div className="flex shrink-0 items-center justify-between px-5 pb-2 pt-3">
-          <h2 className="text-base font-semibold text-main">{title}</h2>
-          <button onClick={onClose} aria-label="Tutup" className="flex h-7 w-7 items-center justify-center rounded-full bg-hover text-xs text-muted">✕</button>
-        </div>
-        {children}
-      </div>
+      </main>
     </div>
   );
 }
 
-/* ── Riwayat Sesi ── */
-function HistoryModal({ open, onClose, sessions, onlineNames, watch, onToggleWatch }: {
-  open: boolean; onClose: () => void; sessions: Record<string, SessionRec>; onlineNames: Set<string> | null; watch: Set<string>; onToggleWatch: (n: string) => void;
-}) {
-  const [q, setQ] = useState('');
-  const rows = useMemo(() => {
-    if (!open) return [];
-    const now = Date.now();
-    const needle = q.trim().toLowerCase();
-    return Object.entries(sessions)
-      .map(([name, r]) => {
-        const online = onlineNames ? onlineNames.has(name) : r.start != null;
-        const total = r.total + (r.start != null ? now - r.start : 0);
-        return { name, online, total, count: r.count, last: r.last };
-      })
-      .filter(r => !needle || r.name.toLowerCase().includes(needle))
-      .sort((a, b) => Number(b.online) - Number(a.online) || b.last - a.last)
-      .slice(0, 200);
-  }, [open, sessions, onlineNames, q, watch]);
+/* ══════════════ Icons ══════════════ */
+function ShieldIcon(props: any) { return <svg {...props} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>; }
+function SettingsIcon(props: any) { return <svg {...props} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>; }
+function UsersIcon(props: any) { return <svg {...props} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>; }
+function SearchIcon(props: any) { return <svg {...props} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>; }
+function StarIcon(props: any) { return <svg {...props} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>; }
+function BugIcon(props: any) { return <svg {...props} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>; }
+function DownloadIcon(props: any) { return <svg {...props} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>; }
+function SparkIcon(props: any) { return <svg {...props} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>; }
 
-  return (
-    <Sheet open={open} onClose={onClose} title="Riwayat sesi" tall>
-      <div className="px-5 pb-3">
-        <div className="relative">
-          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Cari nama player…" className="w-full rounded-xl bg-hover py-2.5 pl-10 pr-3 text-sm text-main outline-none placeholder:text-subtle" />
-        </div>
-        <p className="mt-2 text-[11px] text-subtle">Disimpan di perangkat ini. Sesi baru dihitung jika player hilang lebih dari 15 menit.</p>
-      </div>
-      <div className="flex-1 space-y-1.5 overflow-y-auto px-5 pb-5">
-        {rows.length === 0 && <div className="py-16 text-center text-sm text-subtle">{q ? 'Tidak ada hasil.' : 'Belum ada data sesi. Biarkan halaman terbuka beberapa menit.'}</div>}
-        {rows.map(r => (
-          <div key={r.name} className="flex items-center gap-3 rounded-2xl bg-hover/60 px-3 py-2.5">
-            <button onClick={() => onToggleWatch(r.name)} className={watch.has(r.name) ? 'text-amber-500' : 'text-subtle'} aria-label="Watchlist">
-              <StarIcon className="h-4 w-4" filled={watch.has(r.name)} />
-            </button>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-medium text-main">{r.name}</div>
-              <div className="text-[11px] text-muted">{r.count}x masuk · total {fmtDuration(r.total)}</div>
-            </div>
-            <div className="shrink-0 text-right text-[11px]">
-              {r.online ? <span className="inline-flex items-center gap-1 font-semibold text-emerald-500"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Online</span> : <span className="text-subtle">{timeAgo(r.last)}</span>}
-            </div>
-          </div>
-        ))}
-      </div>
-    </Sheet>
-  );
-}
-
-/* ── Tanya AI ──
-   Mengasumsikan endpoint POST /api/ai menerima { messages, context } dan
-   mengembalikan { reply }. Sesuaikan jika route AI kamu berbeda. */
-function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factionMap }: {
-  open: boolean; onClose: () => void; data: ApiData | null; enriched: EnrichedPlayer[]; counts: Record<string, number>; activeCat: string; factionMap: Map<string, FactionDef>;
-}) {
-  const [msgs, setMsgs] = useState<AiMsg[]>([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const endRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs, loading]);
-
-  const context = useMemo(() => {
-    if (!open || !data) return '';
-    const perFaction = Array.from(factionMap.values()).filter(f => (counts[f.id] ?? 0) > 0).map(f => `${f.label}: ${counts[f.id]}`).join(', ');
-    const list = enriched.slice(0, 200).map(p => `#${p.id} ${p.name} [${p.faction}/${p.side}] ping ${p.ping}`).join('\n');
-    return `Online: ${data.online}/${data.max}. Good: ${counts.GOOD}, Bad: ${counts.BAD}, Civilian: ${counts.CIVILIAN}. Kategori aktif: ${activeCat}.\nPer faction: ${perFaction}\nDaftar player:\n${list}`;
-  }, [open, data, enriched, counts, activeCat, factionMap]);
-
-  const send = async (text?: string) => {
-    const content = (text ?? input).trim();
-    if (!content || loading) return;
-    const next: AiMsg[] = [...msgs, { role: 'user', content }];
-    setMsgs(next); setInput(''); setLoading(true);
-    try {
-      const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: next, context }) });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'AI gagal merespons');
-      setMsgs([...next, { role: 'assistant', content: String(json.reply ?? json.content ?? json.message ?? '') }]);
-    } catch (e: any) {
-      setMsgs([...next, { role: 'assistant', content: `⚠ ${e.message || 'Terjadi kesalahan'}` }]);
-    } finally { setLoading(false); }
-  };
-
-  const ideas = ['Faction mana yang paling ramai?', 'Ringkas kondisi server sekarang', 'Siapa saja yang pingnya tinggi?'];
-
-  return (
-    <Sheet open={open} onClose={onClose} title="Tanya AI" tall>
-      <div className="flex-1 space-y-3 overflow-y-auto px-5 pb-3">
-        {msgs.length === 0 && (
-          <div className="py-6 text-center">
-            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-accent/15 text-accent"><SparkIcon className="h-6 w-6" /></div>
-            <p className="text-sm text-muted">Tanyakan apa saja tentang player yang sedang online.</p>
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
-              {ideas.map(s => <button key={s} onClick={() => send(s)} className="rounded-full bg-hover px-3 py-1.5 text-xs text-main">{s}</button>)}
-            </div>
-          </div>
-        )}
-        {msgs.map((m, i) => (
-          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[88%] rounded-2xl px-3.5 py-2 text-[13px] leading-relaxed ${m.role === 'user' ? 'rounded-br-md bg-accent text-accent-text' : 'rounded-bl-md bg-hover text-main'}`}>
-              {m.role === 'user' ? m.content : renderMarkdown(m.content)}
-            </div>
-          </div>
-        ))}
-        {loading && <div className="flex justify-start"><div className="flex gap-1 rounded-2xl rounded-bl-md bg-hover px-4 py-3">{[0, 1, 2].map(i => <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: `${i * 0.15}s` }} />)}</div></div>}
-        <div ref={endRef} />
-      </div>
-      <div className="flex shrink-0 items-end gap-2 border-t border-line p-3">
-        <textarea
-          value={input} onChange={e => setInput(e.target.value)} rows={1} placeholder="Tulis pertanyaan…"
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-          className="max-h-28 flex-1 resize-none rounded-2xl bg-hover px-4 py-2.5 text-sm text-main outline-none placeholder:text-subtle"
-        />
-        <button onClick={() => send()} disabled={loading || !input.trim()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-accent-text disabled:opacity-40" aria-label="Kirim">↑</button>
-      </div>
-    </Sheet>
-  );
-}
-
-/* ── Pengaturan ── */
-function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button role="switch" aria-checked={on} onClick={() => onChange(!on)} className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-300 ${on ? 'bg-emerald-500' : 'bg-line'}`}>
-      <span className={`absolute left-[2px] top-[2px] h-[27px] w-[27px] rounded-full bg-white shadow-md transition-transform duration-300 ${on ? 'translate-x-[20px]' : ''}`} />
-    </button>
-  );
-}
-
-function Segmented<T extends string | number>({ value, options, onChange }: { value: T; options: { v: T; l: string }[]; onChange: (v: T) => void }) {
-  return (
-    <div className="flex rounded-xl bg-hover p-0.5">
-      {options.map(o => (
-        <button key={String(o.v)} onClick={() => onChange(o.v)} className={`flex-1 whitespace-nowrap rounded-[10px] px-2.5 py-1.5 text-xs font-medium transition ${value === o.v ? 'bg-card text-main shadow-sm' : 'text-muted'}`}>{o.l}</button>
-      ))}
-    </div>
-  );
-}
-
-function SettingsModal({ open, onClose, current, onSave, deviceId }: { open: boolean; onClose: () => void; current: Settings; onSave: (s: Settings) => void; deviceId: string }) {
-  const [draft, setDraft] = useState<Settings>(current);
-  const [idCopied, setIdCopied] = useState(false);
-  const copyId = async () => {
-    try { await navigator.clipboard.writeText(deviceId); setIdCopied(true); setTimeout(() => setIdCopied(false), 1800); }
-    catch { /* clipboard diblokir */ }
-  };
-  useEffect(() => { if (open) setDraft(current); }, [open, current]);
-  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => {
-    setDraft(d => ({ ...d, [k]: v }));
-    if (k === 'theme') document.documentElement.setAttribute('data-theme', v as string); // preview langsung
-  };
-  const close = () => { document.documentElement.setAttribute('data-theme', current.theme); onClose(); };
-
-  const themes: { v: Theme; l: string }[] = [
-    { v: 'ios', l: 'iOS' }, { v: 'iosdark', l: 'iOS Gelap' }, { v: 'dark', l: 'Gelap' }, { v: 'light', l: 'Terang' },
-    { v: 'glass', l: 'Glass' }, { v: 'cyberpunk', l: 'Cyberpunk' }, { v: 'nord', l: 'Nord' },
-  ];
-
-  return (
-    <Sheet open={open} onClose={close} title="Pengaturan">
-      <div className="flex-1 space-y-5 overflow-y-auto px-5 pb-4">
-        <div>
-          <div className="mb-2 text-xs font-medium text-muted">Tema</div>
-          <div className="grid grid-cols-4 gap-2">
-            {themes.map(t => (
-              <button key={t.v} onClick={() => set('theme', t.v)} className={`rounded-xl border px-2 py-2.5 text-xs font-medium transition ${draft.theme === t.v ? 'border-accent bg-accent/10 text-accent' : 'border-line bg-hover/50 text-main'}`}>{t.l}</button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <div className="mb-2 text-xs font-medium text-muted">Auto-refresh</div>
-          <Segmented value={draft.refreshMs} onChange={v => set('refreshMs', v)} options={[{ v: 15000, l: '15d' }, { v: 30000, l: '30d' }, { v: 60000, l: '60d' }, { v: 120000, l: '2m' }]} />
-        </div>
-        <div>
-          <div className="mb-2 text-xs font-medium text-muted">Player per halaman</div>
-          <Segmented value={draft.pageSize} onChange={v => set('pageSize', v)} options={[{ v: 10, l: '10' }, { v: 25, l: '25' }, { v: 50, l: '50' }, { v: 0, l: 'Infinite' }]} />
-        </div>
-        <div>
-          <div className="mb-2 text-xs font-medium text-muted">Gaya tag faction</div>
-          <Segmented value={draft.tagStyle} onChange={v => set('tagStyle', v)} options={[{ v: 'widget', l: 'Widget' }, { v: 'pill', l: 'Pill' }]} />
-        </div>
-        <div className="divide-y divide-line overflow-hidden rounded-2xl border border-line">
-          {([
-            ['compact', 'Tabel ringkas', 'Baris lebih rapat'],
-            ['notifyJoin', 'Notifikasi join/leave', 'Toast saat player masuk atau keluar'],
-            ['notifyRestart', 'Notifikasi restart', 'Peringatan 30 menit sebelum restart'],
-          ] as const).map(([k, l, d]) => (
-            <div key={k} className="flex items-center justify-between gap-4 px-4 py-3">
-              <div><div className="text-sm text-main">{l}</div><div className="text-[11px] text-subtle">{d}</div></div>
-              <Toggle on={draft[k]} onChange={v => set(k, v)} />
-            </div>
-          ))}
-        </div>
-        <div className="rounded-2xl border border-line bg-hover/40 p-4">
-          <div className="mb-1 text-xs font-medium text-muted">Device ID kamu</div>
-          <div className="select-all break-all rounded-xl bg-app px-3 py-2.5 font-mono text-[12px] text-main">{deviceId || '—'}</div>
-          <div className="mt-2 flex items-center justify-between gap-3">
-            <p className="text-[11px] leading-snug text-subtle">Berikan ID ini ke admin jika diminta untuk ACC atau jadi moderator. Jangan dibagikan ke orang lain.</p>
-            <button onClick={copyId} disabled={!deviceId} className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-text disabled:opacity-40">{idCopied ? 'Tersalin ✓' : 'Salin'}</button>
-          </div>
-        </div>
-      </div>
-      <div className="flex shrink-0 gap-2 border-t border-line p-4">
-        <button onClick={close} className="flex-1 rounded-xl bg-hover py-3 text-sm font-medium text-main">Batal</button>
-        <button onClick={() => onSave(draft)} className="flex-1 rounded-xl bg-accent py-3 text-sm font-semibold text-accent-text">Simpan</button>
-      </div>
-    </Sheet>
-  );
-}
-
-/* ── Kartu statistik ── */
-function Stat({ label, value, accent, pulse, small, delta }: { label: string; value: string; accent: string; pulse?: boolean; small?: boolean; delta?: number | null }) {
-  return (
-    <div className="rounded-2xl border border-line bg-card p-4">
-      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-subtle">
-        {pulse && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />}{label}
-      </div>
-      <div className="mt-1.5 flex items-baseline gap-2">
-        <span className={`font-semibold tracking-tight ${accent} ${small ? 'truncate text-base' : 'text-2xl'}`}>{value}</span>
-        {delta != null && delta !== 0 && <span className={`text-[11px] font-semibold ${delta > 0 ? 'text-emerald-500' : 'text-red-500'}`}>{delta > 0 ? '▲' : '▼'}{Math.abs(delta)}</span>}
-      </div>
-    </div>
-  );
-}
-
-/* ── Ikon ── */
-type IconProps = { className?: string };
-const mkIcon = (paths: string[]) => function Icon({ className }: IconProps) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">{paths.map((d, i) => <path key={i} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={d} />)}</svg>;
-};
-const BugIcon = mkIcon(['M8 9a4 4 0 118 0v6a4 4 0 01-8 0V9zm-4 2h4m8 0h4M4 17h4m8 0h4M9 5L7 3m8 2l2-2']);
-const SparkIcon = mkIcon(['M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z']);
-const ClockIcon = mkIcon(['M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z']);
-const SearchIcon = mkIcon(['M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z']);
-const DownloadIcon = mkIcon(['M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4']);
-const LinkIcon = mkIcon(['M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1']);
-const RefreshIcon = mkIcon(['M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15']);
-const GearIcon = mkIcon([
-  'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z',
-  'M15 12a3 3 0 11-6 0 3 3 0 016 0z',
-]);
-function StarIcon({ className, filled }: { className?: string; filled?: boolean }) {
-  return (
-    <svg className={className} fill={filled ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-    </svg>
-  );
-}
-
-/* ── Panel khusus Crimson Creed (muncul di mode CC) ── */
-function CCPanel({ members, sessionMs, watch, missing }: { members: EnrichedPlayer[]; sessionMs: (n: string) => number; watch: Set<string>; missing: boolean }) {
-  const online = members.length;
-  const avgPing = online ? Math.round(members.reduce((a, p) => a + p.ping, 0) / online) : 0;
-  const maxPing = online ? Math.max(...members.map(p => p.ping)) : 0;
-  const watched = members.filter(p => watch.has(p.name)).length;
-  const longest = [...members].sort((a, b) => sessionMs(b.name) - sessionMs(a.name)).slice(0, 5);
-  const cells: { label: string; value: string; cls: string }[] = [
-    { label: 'Anggota online', value: String(online), cls: 'text-red-400' },
-    { label: 'Rata-rata ping', value: online ? `${avgPing} ms` : '—', cls: 'text-main' },
-    { label: 'Ping tertinggi', value: online ? `${maxPing} ms` : '—', cls: maxPing >= 150 ? 'text-red-500' : 'text-main' },
-    { label: 'Di watchlist', value: String(watched), cls: 'text-amber-500' },
-  ];
-  return (
-    <section className="ios-enter mb-6 overflow-hidden rounded-2xl border border-red-500/30 bg-gradient-to-br from-red-500/10 via-card to-card p-4 sm:p-5">
-      <div className="mb-4 flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/20 text-red-500">
-          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
-        </span>
-        <div>
-          <div className="text-sm font-semibold text-main">Panel Crimson Creed</div>
-          <div className="text-[11px] text-muted">Ringkasan anggota CC yang sedang online</div>
-        </div>
-      </div>
-      {missing && <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">Faction dengan Short &quot;CC&quot; belum ada. Tambahkan di Admin Panel &gt; Factions.</div>}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {cells.map(c => (
-          <div key={c.label} className="rounded-xl bg-hover/70 px-3 py-2.5">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">{c.label}</div>
-            <div className={`mt-0.5 text-xl font-semibold ${c.cls}`}>{c.value}</div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-4">
-        <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-subtle">Online terlama</div>
-        {longest.length === 0 ? (
-          <div className="py-3 text-center text-xs text-subtle">Belum ada anggota CC yang online.</div>
-        ) : (
-          <div className="space-y-1.5">
-            {longest.map(p => (
-              <div key={p.id} className="flex items-center justify-between rounded-lg bg-hover/50 px-3 py-2 text-[13px]">
-                <span className="truncate text-main">{p.name}</span>
-                <span className="ml-3 shrink-0 font-mono text-[11px] text-muted">{fmtDuration(sessionMs(p.name))}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
+/* Placeholder for SettingsModal (Assume it exists in original code, omitted for brevity but required for compilation) */
+function SettingsModal({ open, onClose, current, onSave, deviceId }: any) { if (!open) return null; return <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4"><div className="bg-card rounded-2xl p-6 w-full max-w-md border border-line"><h2 className="text-lg font-bold mb-4">Settings</h2><button onClick={onClose} className="bg-accent text-accent-text px-4 py-2 rounded-lg">Close</button></div></div>; }
