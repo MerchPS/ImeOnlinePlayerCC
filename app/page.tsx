@@ -14,7 +14,7 @@ type AdminUser = { id: string; deviceId: string; name: string; role: Role };
 type BugReport = { id: string; deviceId: string; message: string; status: string; createdAt: string };
 type Side = 'GOOD' | 'BAD' | 'NONE';
 type FactionDef = { id: string; label: string; short: string; matchType: string; side?: Side; color?: string | null; badge: string; dot: string };
-type Theme = 'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord';
+type Theme = 'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord' | 'ios' | 'iosdark';
 type Settings = { theme: Theme; refreshMs: number; compact: boolean; tagStyle: 'pill' | 'widget'; pageSize: number; notifyJoin: boolean; notifyRestart: boolean };
 type EnrichedPlayer = Player & { faction: string; side: Side | 'CIVIL' };
 type SessionRec = { start: number | null; last: number; total: number; count: number };
@@ -31,6 +31,7 @@ const WARGA: FactionDef = {
 };
 
 const FALLBACK_FACTIONS: FactionDef[] = [
+  { id: 'cc', label: 'Crimson Creed', short: 'CC', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#2a1515] text-[#f08a8a] border-[#5a2525]', dot: 'bg-[#ef4444]' },
   { id: 'bmc', label: 'BMC', short: 'BMC', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#2a1a2e] text-[#d89ee8] border-[#4a2555]', dot: 'bg-[#c96ce8]' },
   { id: 'cbmc', label: 'CBMC', short: 'CBMC', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#2e1a2a] text-[#e89ec9] border-[#55254a]', dot: 'bg-[#e86caa]' },
   { id: 'sin', label: 'Sinister', short: 'SIN', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#1a1a1a] text-[#e0e0e0] border-[#333333]', dot: 'bg-[#888888]' },
@@ -185,11 +186,24 @@ export default function App() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [isBlurred, setIsBlurred] = useState(false);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [framed, setFramed] = useState(false);
 
   const [showChangelog, setShowChangelog] = useState(false);
   const [bugReportOpen, setBugReportOpen] = useState(false);
 
+  // State khusus moderator
+  const [viewMode, setViewMode] = useState<'ALL' | 'CC' | null>(null);
+
   useEffect(() => {
+    // Anti-iframe (cadangan; yang utama adalah header frame-ancestors di next.config.js)
+    let inFrame = false;
+    try { inFrame = window.top !== window.self; } catch { inFrame = true; }
+    if (inFrame) {
+      setFramed(true);
+      try { window.top!.location.href = window.self.location.href; } catch { /* diblokir */ }
+      return;
+    }
+
     let id = localStorage.getItem('ime-device-id');
     if (!id) { id = crypto.randomUUID(); localStorage.setItem('ime-device-id', id); }
     setDeviceId(id);
@@ -253,6 +267,17 @@ export default function App() {
     };
   }, []);
 
+  if (framed) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-black p-6 text-center text-white">
+        <div>
+          <div className="mb-2 text-lg font-semibold">Halaman ini tidak bisa ditampilkan di dalam frame</div>
+          <a href={typeof window !== 'undefined' ? window.self.location.href : '/'} target="_blank" rel="noopener" className="text-sm text-blue-400 underline">Buka di tab baru</a>
+        </div>
+      </div>
+    );
+  }
+
   if (authStatus === 'LOADING') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-app text-main">
@@ -268,20 +293,30 @@ export default function App() {
     return <LockScreen deviceId={deviceId} status={authStatus} meta={authMeta} onRefresh={() => window.location.reload()} />;
   }
 
+  // Layar pemilihan mode untuk MODERATOR
+  if (role === 'MOD' && viewMode === null) {
+    return <ModSelectionScreen onSelect={(mode) => setViewMode(mode)} />;
+  }
+
   return (
     <div className="relative min-h-screen bg-app text-main overflow-hidden">
       <div className={`transition-all duration-300 ease-out ${isBlurred ? 'blur-[30px] scale-[0.95] opacity-10 pointer-events-none' : ''}`}>
-        <Home
-          isAdmin={authStatus === 'ADMIN'}
-          settings={settings}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onOpenAdmin={() => setAdminOpen(true)}
-        />
-        {authStatus === 'ADMIN' && <AdminPanel open={adminOpen} role={role} onClose={() => setAdminOpen(false)} />}
+        <div key={viewMode ?? 'x'} className="ios-enter">
+          <Home
+            isAdmin={authStatus === 'ADMIN'}
+            role={role}
+            viewMode={viewMode || 'ALL'}
+            onSwitchMode={() => setViewMode(null)}
+            settings={settings}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenAdmin={() => setAdminOpen(true)}
+          />
+          {authStatus === 'ADMIN' && <AdminPanel open={adminOpen} role={role} onClose={() => setAdminOpen(false)} />}
+        </div>
       </div>
-      
+
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} current={settings} onSave={handleSaveSettings} />
-      
+
       {showChangelog && (
         <ChangelogModal onClose={() => {
           localStorage.setItem('ime-changelog-version', 'v1.2');
@@ -292,12 +327,163 @@ export default function App() {
       <button
         onClick={() => setBugReportOpen(true)}
         className="fixed bottom-6 right-6 z-[80] flex h-14 w-14 items-center justify-center rounded-full bg-red-500 text-white shadow-lg shadow-red-500/30 transition-all hover:scale-110 active:scale-95"
+        style={{ marginBottom: 'env(safe-area-inset-bottom)' }}
         title="Laporkan Bug"
       >
         <BugIcon className="h-6 w-6" />
       </button>
 
       <BugReportModal open={bugReportOpen} onClose={() => setBugReportOpen(false)} deviceId={deviceId} />
+    </div>
+  );
+}
+
+/* ═════════ [A] Mod Selection Screen (animasi) ═════════ */
+type Mode = 'ALL' | 'CC';
+
+const MS_CSS = `
+@property --a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes ms-aurora { 0%,100% { transform: translate3d(0,0,0) scale(1); } 50% { transform: translate3d(7%,-9%,0) scale(1.18); } }
+@keyframes ms-rise { from { opacity: 0; transform: translateY(36px) scale(.94); filter: blur(10px); } to { opacity: 1; transform: none; filter: blur(0); } }
+@keyframes ms-drop { from { opacity: 0; transform: translateY(-24px); filter: blur(8px); } to { opacity: 1; transform: none; filter: blur(0); } }
+@keyframes ms-float { 0% { transform: translate3d(0,0,0); opacity: 0; } 10% { opacity: .8; } 100% { transform: translate3d(var(--d),-110vh,0); opacity: 0; } }
+@keyframes ms-shine { from { transform: translateX(-130%) skewX(-20deg); } to { transform: translateX(230%) skewX(-20deg); } }
+@keyframes ms-angle { to { --a: 360deg; } }
+@keyframes ms-shimmer { to { background-position: 200% center; } }
+@keyframes ms-ring { 0% { transform: scale(.85); opacity: .55; } 100% { transform: scale(1.7); opacity: 0; } }
+@keyframes ms-ripple { from { transform: scale(0); } to { transform: scale(160); } }
+@keyframes ms-blink { 50% { opacity: .3; } }
+
+.ms-blob { position: absolute; border-radius: 9999px; filter: blur(110px); animation: ms-aurora 14s ease-in-out infinite; pointer-events: none; }
+.ms-grid { position: absolute; inset: 0; pointer-events: none; opacity: .5;
+  background-image: linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+  background-size: 56px 56px;
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 20%, transparent 70%); mask-image: radial-gradient(ellipse at center, #000 20%, transparent 70%); }
+.ms-dot { position: absolute; bottom: -10px; border-radius: 9999px; background: rgba(255,255,255,.7); animation: ms-float linear infinite; pointer-events: none; }
+.ms-head { animation: ms-drop .8s cubic-bezier(.2,.8,.2,1) backwards; }
+.ms-title { background: linear-gradient(90deg, #fff 0%, #a5b4fc 25%, #fff 50%, #fda4af 75%, #fff 100%); background-size: 200% auto; -webkit-background-clip: text; background-clip: text; color: transparent; animation: ms-shimmer 6s linear infinite; }
+.ms-live { display: inline-block; width: 7px; height: 7px; border-radius: 9999px; background: #34d399; animation: ms-blink 1.6s ease-in-out infinite; }
+
+.ms-card { --rx: 0deg; --ry: 0deg; --mx: 50%; --my: 50%;
+  position: relative; overflow: hidden; isolation: isolate; cursor: pointer; color: #fff; text-align: center;
+  border-radius: 32px; padding: 40px 28px; -webkit-tap-highlight-color: transparent; will-change: transform;
+  background: radial-gradient(420px circle at var(--mx) var(--my), rgba(var(--tint), .24), transparent 55%), rgba(255,255,255,.04);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5); backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 24px 70px -24px rgba(var(--tint), .4);
+  transform: perspective(900px) rotateX(var(--rx)) rotateY(var(--ry));
+  transition: transform .25s ease-out, opacity .5s ease, filter .5s ease, box-shadow .4s ease;
+  animation: ms-rise .9s cubic-bezier(.2,.8,.2,1) var(--delay, 0s) backwards; }
+.ms-card::before { content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1.5px; z-index: -1;
+  background: conic-gradient(from var(--a), rgba(var(--tint), 0) 0 55%, rgba(var(--tint), 1) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); mask-composite: exclude;
+  animation: ms-angle 5s linear infinite; }
+.ms-card:hover { box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 30px 90px -20px rgba(var(--tint), .65); }
+.ms-card:active { transform: perspective(900px) scale(.98); }
+.ms-card:focus-visible { outline: 2px solid rgba(var(--tint), 1); outline-offset: 4px; }
+.ms-card.is-picked { transform: perspective(900px) scale(1.07); box-shadow: 0 0 140px rgba(var(--tint), .8); transition-duration: .5s; }
+.ms-card.is-dim { opacity: 0; filter: blur(10px); transform: perspective(900px) scale(.9); pointer-events: none; }
+.ms-shine { position: absolute; top: 0; bottom: 0; left: 0; width: 40%; pointer-events: none; background: linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent); transform: translateX(-130%) skewX(-20deg); }
+.ms-card:hover .ms-shine { animation: ms-shine .9s ease; }
+.ms-icon { position: relative; display: flex; align-items: center; justify-content: center; width: 84px; height: 84px; margin: 0 auto 24px; border-radius: 26px; background: rgba(var(--tint), .18); color: rgb(var(--tint)); transition: transform .4s cubic-bezier(.32,.72,0,1); }
+.ms-icon::after { content: ''; position: absolute; inset: 0; border-radius: inherit; border: 1.5px solid rgba(var(--tint), .6); animation: ms-ring 2.4s ease-out infinite; }
+.ms-card:hover .ms-icon { transform: translateZ(0) scale(1.12) rotate(var(--tilt, 6deg)); }
+.ms-go { display: inline-flex; align-items: center; gap: 6px; margin-top: 22px; font-size: 13px; font-weight: 600; color: rgb(var(--tint)); }
+.ms-go span { display: inline-block; transition: transform .3s cubic-bezier(.32,.72,0,1); }
+.ms-card:hover .ms-go span { transform: translateX(6px); }
+.ms-ripple { position: fixed; z-index: 50; width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 9999px; pointer-events: none; animation: ms-ripple .85s cubic-bezier(.7,0,.3,1) forwards; }
+@media (prefers-reduced-motion: reduce) { .ms-root *, .ms-root *::before { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+`;
+
+function ModeCard({ title, desc, tint, tilt, delay, icon, state, onPick }: {
+  title: string; desc: string; tint: string; tilt: string; delay: string; icon: string;
+  state: 'idle' | 'picked' | 'dim'; onPick: (e: React.MouseEvent<HTMLButtonElement>) => void;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const move = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const el = ref.current;
+    if (!el || e.pointerType === 'touch' || state !== 'idle') return;
+    const r = el.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width, py = (e.clientY - r.top) / r.height;
+    el.style.setProperty('--rx', `${((0.5 - py) * 14).toFixed(2)}deg`);
+    el.style.setProperty('--ry', `${((px - 0.5) * 14).toFixed(2)}deg`);
+    el.style.setProperty('--mx', `${(px * 100).toFixed(1)}%`);
+    el.style.setProperty('--my', `${(py * 100).toFixed(1)}%`);
+  };
+  const reset = () => {
+    const el = ref.current; if (!el) return;
+    el.style.setProperty('--rx', '0deg'); el.style.setProperty('--ry', '0deg');
+    el.style.setProperty('--mx', '50%'); el.style.setProperty('--my', '50%');
+  };
+  return (
+    <button
+      ref={ref} onClick={onPick} onPointerMove={move} onPointerLeave={reset}
+      className={`ms-card ${state === 'picked' ? 'is-picked' : state === 'dim' ? 'is-dim' : ''}`}
+      style={{ ['--tint' as string]: tint, ['--delay' as string]: delay, ['--tilt' as string]: tilt }}
+    >
+      <span className="ms-shine" />
+      <div className="ms-icon">
+        <svg width="40" height="40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={icon} /></svg>
+      </div>
+      <h2 className="mb-2 text-2xl font-bold tracking-tight">{title}</h2>
+      <p className="mx-auto max-w-[260px] text-sm leading-relaxed text-white/60">{desc}</p>
+      <div className="ms-go">Masuk <span>→</span></div>
+    </button>
+  );
+}
+
+function ModSelectionScreen({ onSelect }: { onSelect: (mode: Mode) => void }) {
+  const [picked, setPicked] = useState<{ mode: Mode; x: number; y: number } | null>(null);
+
+  const particles = useMemo(() => Array.from({ length: 28 }, (_, i) => ({
+    left: (i * 37) % 100, size: 2 + (i % 4), dur: 9 + (i % 7) * 2, delay: -((i * 1.7) % 12), drift: ((i % 5) - 2) * 18,
+  })), []);
+
+  const choose = (mode: Mode, e: React.MouseEvent<HTMLButtonElement>) => {
+    if (picked) return;
+    let x = e.clientX, y = e.clientY;
+    if (!x && !y) { const r = e.currentTarget.getBoundingClientRect(); x = r.left + r.width / 2; y = r.top + r.height / 2; } // dipicu keyboard
+    setPicked({ mode, x, y });
+    setTimeout(() => onSelect(mode), 850);
+  };
+  const stateOf = (m: Mode): 'idle' | 'picked' | 'dim' => (!picked ? 'idle' : picked.mode === m ? 'picked' : 'dim');
+
+  return (
+    <div className="ms-root relative flex min-h-screen items-center justify-center overflow-hidden bg-[#05060a] p-4 font-sans" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
+      <style>{MS_CSS}</style>
+
+      <div className="ms-blob" style={{ top: '-18%', left: '-12%', width: '52%', height: '52%', background: 'rgba(239,68,68,.30)' }} />
+      <div className="ms-blob" style={{ bottom: '-20%', right: '-12%', width: '55%', height: '55%', background: 'rgba(59,130,246,.30)', animationDelay: '-6s' }} />
+      <div className="ms-blob" style={{ top: '30%', left: '38%', width: '30%', height: '30%', background: 'rgba(168,85,247,.18)', animationDelay: '-10s' }} />
+      <div className="ms-grid" />
+      {particles.map((p, i) => (
+        <span key={i} className="ms-dot" style={{ left: `${p.left}%`, width: p.size, height: p.size, animationDuration: `${p.dur}s`, animationDelay: `${p.delay}s`, ['--d' as string]: `${p.drift}px` }} />
+      ))}
+
+      <div className="relative z-10 w-full max-w-4xl">
+        <div className="ms-head mb-10 text-center sm:mb-14" style={{ opacity: picked ? 0 : 1, transition: 'opacity .4s' }}>
+          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/70 backdrop-blur-xl">
+            <span className="ms-live" /> Akses moderator
+          </div>
+          <h1 className="ms-title mb-3 text-4xl font-bold tracking-tight sm:text-6xl">Mau pantau apa hari ini?</h1>
+          <p className="text-base text-white/50 sm:text-lg">Kamu bisa ganti pilihan ini kapan saja lewat tombol Ganti Mode.</p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-6">
+          <ModeCard
+            title="Crimson Creed Only" desc="Fokus memantau dan menganalisis anggota Crimson Creed saja."
+            tint="239,68,68" tilt="-6deg" delay=".25s" state={stateOf('CC')} onPick={e => choose('CC', e)}
+            icon="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+          />
+          <ModeCard
+            title="All Factions" desc="Lihat semua player: semua faction, Civilian, serta Good dan Bad Side."
+            tint="59,130,246" tilt="6deg" delay=".4s" state={stateOf('ALL')} onPick={e => choose('ALL', e)}
+            icon="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </div>
+      </div>
+
+      {picked && <div className="ms-ripple" style={{ left: picked.x, top: picked.y, background: picked.mode === 'CC' ? '#ef4444' : '#3b82f6' }} />}
     </div>
   );
 }
@@ -317,22 +503,11 @@ function ChangelogModal({ onClose }: { onClose: () => void }) {
         </div>
         <div className="px-6 py-5 max-h-[50vh] overflow-y-auto custom-scrollbar">
           <div className="space-y-3 text-sm text-main">
-            <div className="flex gap-3">
-              <span className="text-emerald-500">✅</span>
-              <p><strong>Watchlist & Sesi Player:</strong> Klik ikon bintang (⭐) untuk memantau player. Klik nama player untuk *copy* nama mereka.</p>
-            </div>
-            <div className="flex gap-3">
-              <span className="text-emerald-500">✅</span>
-              <p><strong>Grafik Tren Online:</strong> Lihat riwayat player online 24 jam terakhir</p>
-            </div>
-            <div className="flex gap-3">
-              <span className="text-emerald-500">✅</span>
-              <p><strong>Widget Kubu (Good/Bad/Civilian):</strong> Filter player berdasarkan kubu dengan lebih rapi.</p>
-            </div>
-            <div className="flex gap-3">
-              <span className="text-emerald-500">✅</span>
-              <p><strong>Tombol Report Bug:</strong> Tombol merah di pojok kanan bawah untuk melapor jika ada error.</p>
-            </div>
+            <div className="flex gap-3"><span className="text-emerald-500">✅</span><p><strong>Watchlist & Sesi Player:</strong> Klik ikon bintang (⭐) untuk memantau player. Klik nama player untuk *copy* nama mereka.</p></div>
+            <div className="flex gap-3"><span className="text-emerald-500">✅</span><p><strong>Grafik Tren Online:</strong> Lihat riwayat player online 24 jam terakhir.</p></div>
+            <div className="flex gap-3"><span className="text-emerald-500">✅</span><p><strong>Widget Kubu (Good/Bad/Civilian):</strong> Filter player berdasarkan kubu dengan lebih rapi.</p></div>
+            <div className="flex gap-3"><span className="text-emerald-500">✅</span><p><strong>Tombol Report Bug:</strong> Tombol merah di pojok kanan bawah untuk melapor jika ada error.</p></div>
+            <div className="flex gap-3"><span className="text-emerald-500">✅</span><p><strong>Mode Khusus Moderator:</strong> Moderator dapat memilih untuk fokus ke Crimson Creed atau All Factions.</p></div>
           </div>
 
           <div className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-500">
@@ -346,9 +521,7 @@ function ChangelogModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <div className="border-t border-line bg-app p-4 text-center">
-          <button onClick={onClose} className="w-full rounded-xl bg-accent py-3 text-sm font-bold text-accent-text transition hover:bg-accent-hover">
-            Mengerti & Lanjutkan
-          </button>
+          <button onClick={onClose} className="w-full rounded-xl bg-accent py-3 text-sm font-bold text-accent-text transition hover:bg-accent-hover">Mengerti & Lanjutkan</button>
         </div>
       </div>
     </div>
@@ -402,26 +575,13 @@ function BugReportModal({ open, onClose, deviceId }: { open: boolean; onClose: (
         ) : (
           <>
             <div className="mb-4 flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-red-500/15 text-red-500">
-                <BugIcon className="h-4 w-4" />
-              </span>
-              <div>
-                <h3 className="text-sm font-bold text-main">Laporkan Bug / Error</h3>
-                <p className="text-[11px] text-subtle">Laporan akan masuk ke Admin Panel</p>
-              </div>
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-red-500/15 text-red-500"><BugIcon className="h-4 w-4" /></span>
+              <div><h3 className="text-sm font-bold text-main">Laporkan Bug / Error</h3><p className="text-[11px] text-subtle">Laporan akan masuk ke Admin Panel</p></div>
             </div>
-            <textarea
-              value={message}
-              onChange={e => setMessage(e.target.value)}
-              placeholder="Jelaskan bug yang kamu temukan... (misal: Faction X nyasar ke Y)"
-              rows={4}
-              className="w-full resize-none rounded-lg border border-line bg-app p-3 text-sm text-main outline-none focus:border-accent"
-            />
+            <textarea value={message} onChange={e => setMessage(e.target.value)} placeholder="Jelaskan bug yang kamu temukan..." rows={4} className="w-full resize-none rounded-lg border border-line bg-app p-3 text-sm text-main outline-none focus:border-accent" />
             <div className="mt-4 flex justify-end gap-2">
               <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-muted hover:text-main">Batal</button>
-              <button onClick={submit} disabled={sending || !message.trim()} className="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50">
-                {sending ? 'Mengirim...' : 'Kirim Laporan'}
-              </button>
+              <button onClick={submit} disabled={sending || !message.trim()} className="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50">{sending ? 'Mengirim...' : 'Kirim Laporan'}</button>
             </div>
           </>
         )}
@@ -453,18 +613,15 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string; s
             {status === 'BANNED' || status === 'TIMEOUT' ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /> : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />}
           </svg>
         </div>
-
         <h1 className="text-xl font-bold">
           {status === 'BANNED' ? 'Akses Diblokir' : status === 'TIMEOUT' ? 'Akses Ditangguhkan' : 'Akses Terkunci'}
         </h1>
-
         <p className="mt-2 text-sm text-muted">
           {status === 'BANNED' ? 'Kamu telah melanggar aturan dan dilarang mengakses web ini.' :
             status === 'TIMEOUT' ? 'Akses kamu ditangguhkan sementara.' :
               status === 'PENDING' ? '⏳ Menunggu Hans (Admin) menyetujui permintaan akses kamu.' :
                 'Website ini bersifat privat. Kamu harus meminta izin akses dari Admin Hans terlebih dahulu.'}
         </p>
-
         {(status === 'BANNED' || status === 'TIMEOUT') && (
           <div className="mt-4 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-left">
             <div className="text-xs font-semibold uppercase text-red-400">Alasan:</div>
@@ -474,7 +631,6 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string; s
             )}
           </div>
         )}
-
         {errorMsg && <div className="mt-4 text-xs font-semibold text-orange-500">{errorMsg}</div>}
         {status === 'UNAUTHORIZED' && (
           <button onClick={requestAccess} disabled={loading} className="mt-6 w-full rounded-xl bg-accent py-3 text-sm font-bold text-accent-text transition hover:bg-accent-hover disabled:opacity-50">
@@ -660,7 +816,7 @@ function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => voi
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-app">
-      <header className="flex flex-col border-b border-line bg-card px-4 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:px-6">
+      <header className="flex flex-col border-b border-line bg-card px-4 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:px-6" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
         <div>
           <h1 className="text-lg font-bold flex items-center gap-2 sm:text-xl">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-500">
@@ -681,19 +837,13 @@ function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => voi
 
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         <div className="mx-auto max-w-6xl space-y-6">
-          
+
           {activeTab === 'reports' && (
             <div className="rounded-xl border border-line bg-card overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left whitespace-nowrap">
                   <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs">
-                    <tr>
-                      <th className="px-4 py-3">Tanggal</th>
-                      <th className="px-4 py-3">Device ID</th>
-                      <th className="px-4 py-3 w-full">Laporan Bug</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3 text-right">Aksi</th>
-                    </tr>
+                    <tr><th className="px-4 py-3">Tanggal</th><th className="px-4 py-3">Device ID</th><th className="px-4 py-3 w-full">Laporan Bug</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Aksi</th></tr>
                   </thead>
                   <tbody>
                     {reports.map(r => (
@@ -701,14 +851,8 @@ function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => voi
                         <td className="px-4 py-3 text-muted text-xs">{formatDate(r.createdAt)}</td>
                         <td className="px-4 py-3 font-mono text-[11px] text-subtle">{r.deviceId}</td>
                         <td className="px-4 py-3 text-main whitespace-normal">{r.message}</td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${r.status === 'RESOLVED' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-amber-500/20 text-amber-500'}`}>{r.status}</span>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          {r.status === 'PENDING' && (
-                            <button onClick={() => resolveReport(r.id)} className="rounded bg-emerald-500/10 px-2 py-1 text-[11px] font-medium text-emerald-500 hover:bg-emerald-500/20">Tandai Selesai</button>
-                          )}
-                        </td>
+                        <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${r.status === 'RESOLVED' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-amber-500/20 text-amber-500'}`}>{r.status}</span></td>
+                        <td className="px-4 py-3 text-right">{r.status === 'PENDING' && <button onClick={() => resolveReport(r.id)} className="rounded bg-emerald-500/10 px-2 py-1 text-[11px] font-medium text-emerald-500 hover:bg-emerald-500/20">Tandai Selesai</button>}</td>
                       </tr>
                     ))}
                     {reports.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-subtle">Belum ada laporan bug.</td></tr>}
@@ -1018,7 +1162,7 @@ const GROUP_WIDGETS: { id: Exclude<GroupId, 'ALL'>; label: string; icon: string;
 ];
 
 /* ══════════════ Main Home ══════════════ */
-function Home({ isAdmin, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boolean; settings: Settings; onOpenSettings: () => void; onOpenAdmin: () => void }) {
+function Home({ isAdmin, role, viewMode, onSwitchMode, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boolean; role: Role; viewMode: 'ALL' | 'CC'; onSwitchMode: () => void; settings: Settings; onOpenSettings: () => void; onOpenAdmin: () => void }) {
   const { refreshMs, compact: compactMode, tagStyle } = settings;
   const infinite = settings.pageSize === 0;
   const pageSize = settings.pageSize || 25;
@@ -1280,8 +1424,18 @@ function Home({ isAdmin, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boo
     return rec && rec.start != null ? Date.now() - rec.start : 0;
   }, []);
 
+  // Semua id faction yang alias-nya "CC" (Crimson Creed)
+  const ccIds = useMemo(
+    () => new Set(factions.filter(f => f.short.split(',').map(clean).includes('CC')).map(f => f.id)),
+    [factions]
+  );
+
   const filtered = useMemo(() => {
     let list = enriched;
+
+    // Mode CC: hanya anggota Crimson Creed (kosong jika faction CC belum ada)
+    if (viewMode === 'CC') list = list.filter(p => ccIds.has(p.faction));
+
     if (activeGroup !== 'ALL') {
       list = list.filter(p => activeGroup === 'CIVILIAN' ? p.side === 'CIVIL' : p.side === activeGroup);
     }
@@ -1290,7 +1444,7 @@ function Home({ isAdmin, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boo
     const q = search.trim().toLowerCase();
     if (q) list = list.filter(p => p.name.toLowerCase().includes(q) || String(p.id).includes(q));
     return list;
-  }, [enriched, activeGroup, activeCat, search, onlyWatch, watch]);
+  }, [enriched, activeGroup, activeCat, search, onlyWatch, watch, viewMode, ccIds]);
 
   const sorted = useMemo(() => {
     if (!sortKey) return filtered;
@@ -1318,7 +1472,7 @@ function Home({ isAdmin, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boo
   const slice = infinite ? sorted.slice(0, visibleCount) : sorted.slice(safePage * pageSize, safePage * pageSize + pageSize);
 
   useEffect(() => { if (page !== safePage) setPage(safePage); }, [page, safePage]);
-  useEffect(() => { setPage(0); setVisibleCount(50); }, [search, activeCat, activeGroup, onlyWatch, pageSize]);
+  useEffect(() => { setPage(0); setVisibleCount(50); }, [search, activeCat, activeGroup, onlyWatch, pageSize, viewMode]);
 
   useEffect(() => {
     if (!infinite || !sentinelRef.current) return;
@@ -1329,6 +1483,11 @@ function Home({ isAdmin, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boo
   }, [infinite, sorted.length, visibleCount]);
 
   const navCats = useMemo(() => {
+    // Mode CC: nav hanya menampilkan satu kategori
+    if (viewMode === 'CC') {
+      return [{ id: 'SEMUA', short: 'Crimson Creed', dot: 'bg-red-500', color: null as string | null | undefined }];
+    }
+
     const items = [
       { id: 'SEMUA', short: 'Semua', dot: 'bg-accent', color: null as string | null | undefined },
       ...factions.filter(f => {
@@ -1336,13 +1495,17 @@ function Home({ isAdmin, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boo
         if (activeGroup === 'CIVILIAN') return false;
         return resolveSide(f) === activeGroup;
       }).map(f => ({ id: f.id, short: f.short.split(',')[0], dot: f.dot, color: f.color })),
-      { id: 'WARGA', short: WARGA.short, dot: WARGA.dot, color: null },
+      { id: 'WARGA', short: WARGA.short, dot: WARGA.dot, color: null as string | null | undefined },
     ];
     return items.filter(it => {
       if (it.id === 'WARGA') return activeGroup === 'ALL' || activeGroup === 'CIVILIAN';
       return (counts[it.id] ?? 0) > 0 || it.id === activeCat || it.id === 'SEMUA';
     });
-  }, [counts, activeCat, factions, activeGroup]);
+  }, [counts, activeCat, factions, activeGroup, viewMode]);
+
+  // Hitungan nav di mode CC harus mengikuti jumlah anggota CC, bukan semua player
+  const ccCount = useMemo(() => enriched.filter(p => ccIds.has(p.faction)).length, [enriched, ccIds]);
+  const navCount = (id: string) => (viewMode === 'CC' ? ccCount : counts[id] ?? 0);
 
   const isWarning = countdown && countdown.diffMs < 30 * 60 * 1000;
 
@@ -1382,7 +1545,7 @@ function Home({ isAdmin, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boo
         </div>
       )}
 
-      <div className="pointer-events-none fixed bottom-4 left-0 right-0 z-[200] flex flex-col items-center gap-2 px-3">
+      <div className="pointer-events-none fixed bottom-4 left-0 right-0 z-[200] flex flex-col items-center gap-2 px-3" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {toasts.map(t => (
           <div key={t.id} className={`pointer-events-auto max-w-sm rounded-xl border px-4 py-2.5 text-xs font-medium shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 ${t.kind === 'good' ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-400' : t.kind === 'bad' ? 'border-red-500/30 bg-red-500/15 text-red-400' : t.kind === 'watch' ? 'border-amber-500/40 bg-amber-500/15 text-amber-400' : 'border-line bg-card text-main'}`}>
             {t.text}
@@ -1390,7 +1553,7 @@ function Home({ isAdmin, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boo
         ))}
       </div>
 
-      <div className="fixed top-3 left-0 right-0 z-40 flex justify-center px-3">
+      <div className="fixed top-3 left-0 right-0 z-40 flex justify-center px-3" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
         <div className="relative w-full max-w-5xl overflow-hidden rounded-full">
           <div className="pointer-events-none absolute left-0 top-0 z-20 h-full w-12 bg-gradient-to-r from-app via-app/80 to-transparent rounded-l-full backdrop-blur-[2px]" />
           <div
@@ -1405,7 +1568,7 @@ function Home({ isAdmin, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boo
                 >
                   <span className={`h-1.5 w-1.5 rounded-full transition-colors ${active ? 'bg-accent-text' : cat.color ? '' : cat.dot}`} style={!active && cat.color ? { backgroundColor: cat.color } : undefined} />
                   <span>{cat.short}</span>
-                  <span className={`text-[10px] ${active ? 'text-accent-text/80' : 'text-subtle'}`}>{counts[cat.id] ?? 0}</span>
+                  <span className={`text-[10px] ${active ? 'text-accent-text/80' : 'text-subtle'}`}>{navCount(cat.id)}</span>
                 </button>
               );
             })}
@@ -1419,16 +1582,27 @@ function Home({ isAdmin, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boo
           <div>
             <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-subtle">IME Roleplay</div>
             <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight sm:text-3xl">
-              Player Monitor
+              {viewMode === 'CC' ? 'Crimson Creed Monitor' : 'Player Monitor'}
               <span className="relative flex h-3 w-3">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-500"></span>
               </span>
             </h1>
-            <p className="mt-1 text-sm text-muted">Pantau siapa saja yang sedang bermain sekarang</p>
+            <p className="mt-1 text-sm text-muted">
+              {viewMode === 'CC' ? 'Memantau khusus anggota Crimson Creed' : 'Pantau siapa saja yang sedang bermain sekarang'}
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {role === 'MOD' && (
+              <button
+                onClick={onSwitchMode}
+                className="flex h-8 items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-3 text-red-500 transition hover:bg-red-500/20"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                <span className="text-xs font-semibold">Ganti Mode</span>
+              </button>
+            )}
             {countdown && (
               <div className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-mono transition-colors ${isWarning ? 'border-red-500/50 bg-red-500/10 text-red-500' : 'border-line bg-card text-muted'}`}>
                 <span className="hidden sm:inline">Restart dalam</span><span className="sm:hidden">Restart</span><span className="font-bold">{formatTime(countdown.diffMs)}</span>
@@ -1476,31 +1650,33 @@ function Home({ isAdmin, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boo
           {chartOpen && <div className="mt-3"><OnlineChart points={history} /></div>}
         </section>
 
-        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {GROUP_WIDGETS.map(w => {
-            const on = activeGroup === w.id;
-            return (
-              <button key={w.id}
-                onClick={() => { setActiveGroup(on ? 'ALL' : w.id); setActiveCat('SEMUA'); }}
-                className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl border p-4 text-left transition-all duration-300 ${on ? w.active : w.idle}`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${on ? w.iconActive : w.iconIdle}`}>
-                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={w.icon} /></svg>
+        {viewMode !== 'CC' && (
+          <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {GROUP_WIDGETS.map(w => {
+              const on = activeGroup === w.id;
+              return (
+                <button key={w.id}
+                  onClick={() => { setActiveGroup(on ? 'ALL' : w.id); setActiveCat('SEMUA'); }}
+                  className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl border p-4 text-left transition-all duration-300 ${on ? w.active : w.idle}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className={`flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${on ? w.iconActive : w.iconIdle}`}>
+                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={w.icon} /></svg>
+                    </div>
+                    {on && <span className={`flex h-2 w-2 rounded-full animate-pulse ${w.dot}`} />}
                   </div>
-                  {on && <span className={`flex h-2 w-2 rounded-full animate-pulse ${w.dot}`} />}
-                </div>
-                <div className="mt-4">
-                  <div className={`text-[10px] font-semibold uppercase tracking-wider ${w.text}`}>{w.label}</div>
-                  <div className="mt-1 flex items-baseline gap-2">
-                    <span className="text-2xl font-bold text-main">{counts[w.id]}</span>
-                    <span className="text-xs text-muted">player</span>
+                  <div className="mt-4">
+                    <div className={`text-[10px] font-semibold uppercase tracking-wider ${w.text}`}>{w.label}</div>
+                    <div className="mt-1 flex items-baseline gap-2">
+                      <span className="text-2xl font-bold text-main">{counts[w.id]}</span>
+                      <span className="text-xs text-muted">player</span>
+                    </div>
                   </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {error && <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">⚠ {error}</div>}
 
@@ -1593,233 +1769,268 @@ function Home({ isAdmin, settings, onOpenSettings, onOpenAdmin }: { isAdmin: boo
   );
 }
 
-/* ══════════════ Riwayat Sesi Modal ══════════════ */
-function HistoryModal({ open, onClose, sessions, onlineNames, watch, onToggleWatch }: { open: boolean; onClose: () => void; sessions: Record<string, SessionRec>; onlineNames: Set<string> | null; watch: Set<string>; onToggleWatch: (n: string) => void }) {
-  const [q, setQ] = useState('');
-  const rows = useMemo(() => {
-    if (!open) return [];
-    const needle = q.trim().toLowerCase();
-    return Object.entries(sessions)
-      .filter(([name]) => !needle || name.toLowerCase().includes(needle))
-      .map(([name, rec]) => ({ name, rec, online: rec.start != null && !!onlineNames?.has(name), cur: rec.start != null ? rec.last - rec.start : 0 }))
-      .sort((a, b) => (a.online === b.online ? b.rec.last - a.rec.last : a.online ? -1 : 1))
-      .slice(0, 200);
-  }, [open, q, sessions, onlineNames]);
+/* ═════════ [B] Sisa file: Sheet, HistoryModal, AIDrawer, SettingsModal, Stat, ikon ═════════ */
 
+/* Bottom sheet ala iOS: naik dari bawah di HP, dialog di tengah di desktop */
+function Sheet({ open, onClose, title, tall, children }: { open: boolean; onClose: () => void; title: string; tall?: boolean; children: React.ReactNode }) {
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [open, onClose]);
   if (!open) return null;
-  
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-line bg-card shadow-2xl">
-        <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <div>
-            <div className="text-sm font-semibold text-main">Riwayat Sesi Pemain</div>
-            <div className="text-[11px] text-subtle">Terakhir terlihat & total waktu main</div>
-          </div>
-          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main">
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
+    <div className="fixed inset-0 z-[150] flex items-end justify-center sm:items-center sm:p-4">
+      <div className="ios-fade absolute inset-0 bg-black/40 backdrop-blur-md" onClick={onClose} />
+      <div
+        className={`ios-sheet relative flex w-full max-w-lg flex-col overflow-hidden rounded-t-[28px] border border-line bg-card shadow-2xl sm:rounded-[28px] ${tall ? 'h-[85dvh] sm:h-[80vh]' : 'max-h-[88dvh]'}`}
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        <div className="mx-auto mt-2 h-1.5 w-10 shrink-0 rounded-full bg-line sm:hidden" />
+        <div className="flex shrink-0 items-center justify-between px-5 pb-2 pt-3">
+          <h2 className="text-base font-semibold text-main">{title}</h2>
+          <button onClick={onClose} aria-label="Tutup" className="flex h-7 w-7 items-center justify-center rounded-full bg-hover text-xs text-muted">✕</button>
         </div>
-        <div className="border-b border-line p-3">
-          <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Cari nama…" className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent/50" />
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {rows.length === 0 ? (
-            <div className="px-4 py-12 text-center text-sm text-subtle">Belum ada data sesi.</div>
-          ) : (
-            rows.map(r => (
-              <div key={r.name} className="flex items-center gap-3 border-b border-line px-4 py-3">
-                <button onClick={() => onToggleWatch(r.name)} className={watch.has(r.name) ? 'text-amber-500' : 'text-subtle hover:text-amber-500'}>
-                  <StarIcon className="h-4 w-4" filled={watch.has(r.name)} />
-                </button>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px] text-main">{r.name}</div>
-                  <div className="mt-0.5 text-[11px] text-muted">
-                    {r.online ? <span className="text-emerald-500">● Online · sesi {fmtDuration(Date.now() - (r.rec.start ?? Date.now()))}</span> : <>Terakhir: {timeAgo(r.rec.last)}</>}
-                  </div>
-                </div>
-                <div className="text-right text-[11px] text-muted">
-                  <div className="font-mono text-main">{fmtDuration(r.rec.total + r.cur)}</div>
-                  <div>{r.rec.count}× sesi</div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-        <div className="border-t border-line bg-app px-5 py-2 text-[10px] text-subtle">Dicatat dari browser ini hanya saat halaman terbuka, jadi angka bisa lebih kecil dari waktu main sebenarnya.</div>
+        {children}
       </div>
     </div>
   );
 }
 
-/* ══════════════ Settings Modal ══════════════ */
+/* ── Riwayat Sesi ── */
+function HistoryModal({ open, onClose, sessions, onlineNames, watch, onToggleWatch }: {
+  open: boolean; onClose: () => void; sessions: Record<string, SessionRec>; onlineNames: Set<string> | null; watch: Set<string>; onToggleWatch: (n: string) => void;
+}) {
+  const [q, setQ] = useState('');
+  const rows = useMemo(() => {
+    if (!open) return [];
+    const now = Date.now();
+    const needle = q.trim().toLowerCase();
+    return Object.entries(sessions)
+      .map(([name, r]) => {
+        const online = onlineNames ? onlineNames.has(name) : r.start != null;
+        const total = r.total + (r.start != null ? now - r.start : 0);
+        return { name, online, total, count: r.count, last: r.last };
+      })
+      .filter(r => !needle || r.name.toLowerCase().includes(needle))
+      .sort((a, b) => Number(b.online) - Number(a.online) || b.last - a.last)
+      .slice(0, 200);
+  }, [open, sessions, onlineNames, q, watch]);
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Riwayat sesi" tall>
+      <div className="px-5 pb-3">
+        <div className="relative">
+          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Cari nama player…" className="w-full rounded-xl bg-hover py-2.5 pl-10 pr-3 text-sm text-main outline-none placeholder:text-subtle" />
+        </div>
+        <p className="mt-2 text-[11px] text-subtle">Disimpan di perangkat ini. Sesi baru dihitung jika player hilang lebih dari 15 menit.</p>
+      </div>
+      <div className="flex-1 space-y-1.5 overflow-y-auto px-5 pb-5">
+        {rows.length === 0 && <div className="py-16 text-center text-sm text-subtle">{q ? 'Tidak ada hasil.' : 'Belum ada data sesi. Biarkan halaman terbuka beberapa menit.'}</div>}
+        {rows.map(r => (
+          <div key={r.name} className="flex items-center gap-3 rounded-2xl bg-hover/60 px-3 py-2.5">
+            <button onClick={() => onToggleWatch(r.name)} className={watch.has(r.name) ? 'text-amber-500' : 'text-subtle'} aria-label="Watchlist">
+              <StarIcon className="h-4 w-4" filled={watch.has(r.name)} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px] font-medium text-main">{r.name}</div>
+              <div className="text-[11px] text-muted">{r.count}x masuk · total {fmtDuration(r.total)}</div>
+            </div>
+            <div className="shrink-0 text-right text-[11px]">
+              {r.online ? <span className="inline-flex items-center gap-1 font-semibold text-emerald-500"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Online</span> : <span className="text-subtle">{timeAgo(r.last)}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Sheet>
+  );
+}
+
+/* ── Tanya AI ──
+   Mengasumsikan endpoint POST /api/ai menerima { messages, context } dan
+   mengembalikan { reply }. Sesuaikan jika route AI kamu berbeda. */
+function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factionMap }: {
+  open: boolean; onClose: () => void; data: ApiData | null; enriched: EnrichedPlayer[]; counts: Record<string, number>; activeCat: string; factionMap: Map<string, FactionDef>;
+}) {
+  const [msgs, setMsgs] = useState<AiMsg[]>([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs, loading]);
+
+  const context = useMemo(() => {
+    if (!open || !data) return '';
+    const perFaction = Array.from(factionMap.values()).filter(f => (counts[f.id] ?? 0) > 0).map(f => `${f.label}: ${counts[f.id]}`).join(', ');
+    const list = enriched.slice(0, 200).map(p => `#${p.id} ${p.name} [${p.faction}/${p.side}] ping ${p.ping}`).join('\n');
+    return `Online: ${data.online}/${data.max}. Good: ${counts.GOOD}, Bad: ${counts.BAD}, Civilian: ${counts.CIVILIAN}. Kategori aktif: ${activeCat}.\nPer faction: ${perFaction}\nDaftar player:\n${list}`;
+  }, [open, data, enriched, counts, activeCat, factionMap]);
+
+  const send = async (text?: string) => {
+    const content = (text ?? input).trim();
+    if (!content || loading) return;
+    const next: AiMsg[] = [...msgs, { role: 'user', content }];
+    setMsgs(next); setInput(''); setLoading(true);
+    try {
+      const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: next, context }) });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'AI gagal merespons');
+      setMsgs([...next, { role: 'assistant', content: String(json.reply ?? json.content ?? json.message ?? '') }]);
+    } catch (e: any) {
+      setMsgs([...next, { role: 'assistant', content: `⚠ ${e.message || 'Terjadi kesalahan'}` }]);
+    } finally { setLoading(false); }
+  };
+
+  const ideas = ['Faction mana yang paling ramai?', 'Ringkas kondisi server sekarang', 'Siapa saja yang pingnya tinggi?'];
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Tanya AI" tall>
+      <div className="flex-1 space-y-3 overflow-y-auto px-5 pb-3">
+        {msgs.length === 0 && (
+          <div className="py-6 text-center">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-accent/15 text-accent"><SparkIcon className="h-6 w-6" /></div>
+            <p className="text-sm text-muted">Tanyakan apa saja tentang player yang sedang online.</p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {ideas.map(s => <button key={s} onClick={() => send(s)} className="rounded-full bg-hover px-3 py-1.5 text-xs text-main">{s}</button>)}
+            </div>
+          </div>
+        )}
+        {msgs.map((m, i) => (
+          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[88%] rounded-2xl px-3.5 py-2 text-[13px] leading-relaxed ${m.role === 'user' ? 'rounded-br-md bg-accent text-accent-text' : 'rounded-bl-md bg-hover text-main'}`}>
+              {m.role === 'user' ? m.content : renderMarkdown(m.content)}
+            </div>
+          </div>
+        ))}
+        {loading && <div className="flex justify-start"><div className="flex gap-1 rounded-2xl rounded-bl-md bg-hover px-4 py-3">{[0, 1, 2].map(i => <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: `${i * 0.15}s` }} />)}</div></div>}
+        <div ref={endRef} />
+      </div>
+      <div className="flex shrink-0 items-end gap-2 border-t border-line p-3">
+        <textarea
+          value={input} onChange={e => setInput(e.target.value)} rows={1} placeholder="Tulis pertanyaan…"
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          className="max-h-28 flex-1 resize-none rounded-2xl bg-hover px-4 py-2.5 text-sm text-main outline-none placeholder:text-subtle"
+        />
+        <button onClick={() => send()} disabled={loading || !input.trim()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-accent-text disabled:opacity-40" aria-label="Kirim">↑</button>
+      </div>
+    </Sheet>
+  );
+}
+
+/* ── Pengaturan ── */
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
-    <button onClick={() => onChange(!on)} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${on ? 'bg-accent' : 'bg-hover'}`}>
-      <span className={`absolute top-1 left-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${on ? 'translate-x-5' : 'translate-x-0'}`} />
+    <button role="switch" aria-checked={on} onClick={() => onChange(!on)} className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-300 ${on ? 'bg-emerald-500' : 'bg-line'}`}>
+      <span className={`absolute left-[2px] top-[2px] h-[27px] w-[27px] rounded-full bg-white shadow-md transition-transform duration-300 ${on ? 'translate-x-[20px]' : ''}`} />
     </button>
+  );
+}
+
+function Segmented<T extends string | number>({ value, options, onChange }: { value: T; options: { v: T; l: string }[]; onChange: (v: T) => void }) {
+  return (
+    <div className="flex rounded-xl bg-hover p-0.5">
+      {options.map(o => (
+        <button key={String(o.v)} onClick={() => onChange(o.v)} className={`flex-1 whitespace-nowrap rounded-[10px] px-2.5 py-1.5 text-xs font-medium transition ${value === o.v ? 'bg-card text-main shadow-sm' : 'text-muted'}`}>{o.l}</button>
+      ))}
+    </div>
   );
 }
 
 function SettingsModal({ open, onClose, current, onSave }: { open: boolean; onClose: () => void; current: Settings; onSave: (s: Settings) => void }) {
   const [draft, setDraft] = useState<Settings>(current);
   useEffect(() => { if (open) setDraft(current); }, [open, current]);
-  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setDraft(d => ({ ...d, [k]: v }));
+  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => {
+    setDraft(d => ({ ...d, [k]: v }));
+    if (k === 'theme') document.documentElement.setAttribute('data-theme', v as string); // preview langsung
+  };
+  const close = () => { document.documentElement.setAttribute('data-theme', current.theme); onClose(); };
 
-  if (!open) return null;
+  const themes: { v: Theme; l: string }[] = [
+    { v: 'ios', l: 'iOS' }, { v: 'iosdark', l: 'iOS Gelap' }, { v: 'dark', l: 'Gelap' }, { v: 'light', l: 'Terang' },
+    { v: 'glass', l: 'Glass' }, { v: 'cyberpunk', l: 'Cyberpunk' }, { v: 'nord', l: 'Nord' },
+  ];
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={onClose} />
-      <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-line bg-card shadow-2xl animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between border-b border-line px-5 py-4 sticky top-0 bg-card z-10">
-          <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15"><GearIcon className="h-4 w-4 text-accent" /></span>
-            <div><div className="text-sm font-semibold text-main">Pengaturan</div><div className="text-[11px] text-subtle">Tampilan & preferensi</div></div>
-          </div>
-          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
-        </div>
-        <div className="space-y-6 px-5 py-5">
-          <div>
-            <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Tema Tampilan</div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {([
-                { id: 'dark', label: 'Dark', bg: 'bg-[#0c0a08]', border: 'border-[#2a2520]' },
-                { id: 'light', label: 'Light', bg: 'bg-[#f8fafc]', border: 'border-[#e2e8f0]' },
-                { id: 'glass', label: 'Glass', bg: 'bg-[#09090b]', border: 'border-white/10' },
-                { id: 'cyberpunk', label: 'Cyberpunk', bg: 'bg-[#050505]', border: 'border-[#fcee0a]' },
-                { id: 'nord', label: 'Nord', bg: 'bg-[#2e3440]', border: 'border-[#4c566a]' },
-              ] as { id: Theme; label: string; bg: string; border: string }[]).map(t => (
-                <button key={t.id} onClick={() => set('theme', t.id)} className={`group relative flex flex-col items-center justify-center gap-2 rounded-xl border p-3 transition-all ${draft.theme === t.id ? 'border-accent ring-2 ring-accent/20' : 'border-line hover:border-accent/40'}`}>
-                  <div className={`h-10 w-full rounded-md border ${t.bg} ${t.border} flex items-center justify-center`}><div className={`h-1.5 w-6 rounded-full ${draft.theme === t.id ? 'bg-accent' : 'bg-line'}`} /></div>
-                  <span className={`text-xs font-medium ${draft.theme === t.id ? 'text-accent' : 'text-muted group-hover:text-main'}`}>{t.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <hr className="border-line" />
-
-          <div>
-            <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Gaya Tag Faction</div>
-            <div className="flex rounded-lg border border-line bg-app p-1">
-              <button onClick={() => set('tagStyle', 'pill')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${draft.tagStyle === 'pill' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Pill (Bulat)</button>
-              <button onClick={() => set('tagStyle', 'widget')} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${draft.tagStyle === 'widget' ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>Widget (Soft Card)</button>
-            </div>
-          </div>
-
-          <hr className="border-line" />
-          <div>
-            <div className="mb-3 flex items-center justify-between"><div className="text-[11px] font-semibold uppercase tracking-wider text-subtle">Interval Refresh</div><div className="text-[11px] text-muted">{draft.refreshMs / 1000} detik</div></div>
-            <div className="flex rounded-lg border border-line bg-app p-1">
-              {[30, 60, 120].map(s => (
-                <button key={s} onClick={() => set('refreshMs', s * 1000)} className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${draft.refreshMs === s * 1000 ? 'bg-card text-main shadow-sm' : 'text-muted hover:text-main'}`}>{s} Detik</button>
-              ))}
-            </div>
-          </div>
-
-          <hr className="border-line" />
-          <div className="flex items-center justify-between">
-            <div><div className="text-sm font-medium text-main">Mode Ringkas</div><div className="text-[11px] text-muted mt-0.5">Kurangi jarak antar baris tabel agar muat lebih banyak.</div></div>
-            <Toggle on={draft.compact} onChange={v => set('compact', v)} />
+    <Sheet open={open} onClose={close} title="Pengaturan">
+      <div className="flex-1 space-y-5 overflow-y-auto px-5 pb-4">
+        <div>
+          <div className="mb-2 text-xs font-medium text-muted">Tema</div>
+          <div className="grid grid-cols-4 gap-2">
+            {themes.map(t => (
+              <button key={t.v} onClick={() => set('theme', t.v)} className={`rounded-xl border px-2 py-2.5 text-xs font-medium transition ${draft.theme === t.v ? 'border-accent bg-accent/10 text-accent' : 'border-line bg-hover/50 text-main'}`}>{t.l}</button>
+            ))}
           </div>
         </div>
-        <div className="border-t border-line bg-app px-5 py-3 text-right sticky bottom-0 z-10">
-          <button onClick={() => onSave(draft)} className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-text transition hover:bg-accent-hover">Simpan & Tutup</button>
+        <div>
+          <div className="mb-2 text-xs font-medium text-muted">Auto-refresh</div>
+          <Segmented value={draft.refreshMs} onChange={v => set('refreshMs', v)} options={[{ v: 15000, l: '15d' }, { v: 30000, l: '30d' }, { v: 60000, l: '60d' }, { v: 120000, l: '2m' }]} />
         </div>
+        <div>
+          <div className="mb-2 text-xs font-medium text-muted">Player per halaman</div>
+          <Segmented value={draft.pageSize} onChange={v => set('pageSize', v)} options={[{ v: 10, l: '10' }, { v: 25, l: '25' }, { v: 50, l: '50' }, { v: 0, l: 'Infinite' }]} />
+        </div>
+        <div>
+          <div className="mb-2 text-xs font-medium text-muted">Gaya tag faction</div>
+          <Segmented value={draft.tagStyle} onChange={v => set('tagStyle', v)} options={[{ v: 'widget', l: 'Widget' }, { v: 'pill', l: 'Pill' }]} />
+        </div>
+        <div className="divide-y divide-line overflow-hidden rounded-2xl border border-line">
+          {([
+            ['compact', 'Tabel ringkas', 'Baris lebih rapat'],
+            ['notifyJoin', 'Notifikasi join/leave', 'Toast saat player masuk atau keluar'],
+            ['notifyRestart', 'Notifikasi restart', 'Peringatan 30 menit sebelum restart'],
+          ] as const).map(([k, l, d]) => (
+            <div key={k} className="flex items-center justify-between gap-4 px-4 py-3">
+              <div><div className="text-sm text-main">{l}</div><div className="text-[11px] text-subtle">{d}</div></div>
+              <Toggle on={draft[k]} onChange={v => set(k, v)} />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="flex shrink-0 gap-2 border-t border-line p-4">
+        <button onClick={close} className="flex-1 rounded-xl bg-hover py-3 text-sm font-medium text-main">Batal</button>
+        <button onClick={() => onSave(draft)} className="flex-1 rounded-xl bg-accent py-3 text-sm font-semibold text-accent-text">Simpan</button>
+      </div>
+    </Sheet>
+  );
+}
+
+/* ── Kartu statistik ── */
+function Stat({ label, value, accent, pulse, small, delta }: { label: string; value: string; accent: string; pulse?: boolean; small?: boolean; delta?: number | null }) {
+  return (
+    <div className="rounded-2xl border border-line bg-card p-4">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-subtle">
+        {pulse && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />}{label}
+      </div>
+      <div className="mt-1.5 flex items-baseline gap-2">
+        <span className={`font-semibold tracking-tight ${accent} ${small ? 'truncate text-base' : 'text-2xl'}`}>{value}</span>
+        {delta != null && delta !== 0 && <span className={`text-[11px] font-semibold ${delta > 0 ? 'text-emerald-500' : 'text-red-500'}`}>{delta > 0 ? '▲' : '▼'}{Math.abs(delta)}</span>}
       </div>
     </div>
   );
 }
 
-/* ══════════════ AI Drawer ══════════════ */
-function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factionMap }: any) {
-  const [msgs, setMsgs] = useState<AiMsg[]>([]);
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [msgs, sending]);
-
-  const buildContext = useCallback(() => {
-    if (!data) return null;
-    const factionSummary: any = {};
-    for (const [id, count] of Object.entries(counts)) {
-      if (id === 'SEMUA' || id === 'GOOD' || id === 'BAD' || id === 'CIVILIAN' || !count) continue;
-      const f = factionMap.get(id);
-      factionSummary[id] = { label: f?.label || 'Unknown', count };
-    }
-    return { totalOnline: data.online, maxSlots: data.max, gate: data.gate, updatedAt: data.updatedAt, currentFilter: activeCat, factions: factionSummary, players: enriched.slice(0, 150).map((p: any) => ({ kantong: p.id, nama: p.name, faction: factionMap.get(p.faction)?.label || 'Untagged', ping: p.ping })) };
-  }, [data, counts, activeCat, enriched, factionMap]);
-
-  async function send(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed || sending) return;
-    const next: AiMsg[] = [...msgs, { role: 'user', content: trimmed }];
-    setMsgs(next); setInput(''); setSending(true);
-    try {
-      const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: next, context: buildContext() }) });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Gagal');
-      setMsgs([...next, { role: 'assistant', content: json.text }]);
-    } catch (e: any) { setMsgs([...next, { role: 'assistant', content: `⚠ ${e.message}` }]); } finally { setSending(false); }
-  }
-
-  const SUGGESTIONS = ['Ringkas siapa saja yang online sekarang', 'Faction apa yang paling banyak online?', 'Siapa saja polisi (LSPD/LSSD) yang online?', 'Ada berapa CC dan siapa nama mereka?', 'Player mana yang pingnya paling buruk?'];
-
+/* ── Ikon ── */
+type IconProps = { className?: string };
+const mkIcon = (paths: string[]) => function Icon({ className }: IconProps) {
+  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">{paths.map((d, i) => <path key={i} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={d} />)}</svg>;
+};
+const BugIcon = mkIcon(['M8 9a4 4 0 118 0v6a4 4 0 01-8 0V9zm-4 2h4m8 0h4M4 17h4m8 0h4M9 5L7 3m8 2l2-2']);
+const SparkIcon = mkIcon(['M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z']);
+const ClockIcon = mkIcon(['M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z']);
+const SearchIcon = mkIcon(['M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z']);
+const DownloadIcon = mkIcon(['M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4']);
+const LinkIcon = mkIcon(['M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1']);
+const RefreshIcon = mkIcon(['M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15']);
+const GearIcon = mkIcon([
+  'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z',
+  'M15 12a3 3 0 11-6 0 3 3 0 016 0z',
+]);
+function StarIcon({ className, filled }: { className?: string; filled?: boolean }) {
   return (
-    <div className={`fixed inset-0 z-50 ${open ? '' : 'pointer-events-none'}`}>
-      <div onClick={onClose} className={`absolute inset-0 bg-black/50 transition-opacity ${open ? 'opacity-100' : 'opacity-0'}`} />
-      <aside className={`absolute right-0 top-0 flex h-full w-full flex-col border-l border-line bg-app transition-transform duration-300 sm:w-[440px] ${open ? 'translate-x-0' : 'translate-x-full'}`}>
-        <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15"><SparkIcon className="h-4 w-4 text-accent" /></span><div><div className="text-sm font-semibold text-main">Analisis AI</div><div className="text-[11px] text-subtle">Konteks data realtime</div></div></div>
-          <button onClick={onClose} className="rounded-md p-1.5 text-subtle transition hover:bg-hover hover:text-main"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
-        </div>
-        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-          {msgs.length === 0 && (<div className="space-y-3"><p className="text-sm text-muted">Tanya apa saja soal server yang lagi online. Contoh:</p><div className="flex flex-col gap-2">{SUGGESTIONS.map(s => (<button key={s} onClick={() => send(s)} className="rounded-lg border border-line bg-card px-3 py-2 text-left text-[13px] text-muted transition hover:border-accent/40 hover:bg-hover hover:text-main">{s}</button>))}</div></div>)}
-          {msgs.map((m, i) => (<div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed ${m.role === 'user' ? 'bg-accent text-accent-text whitespace-pre-wrap' : 'border border-line bg-card text-main'}`}>{m.role === 'user' ? m.content : renderMarkdown(m.content)}</div></div>))}
-          {sending && (<div className="flex justify-start"><div className="flex gap-1 rounded-xl border border-line bg-card px-3.5 py-3"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '0ms' }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '150ms' }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" style={{ animationDelay: '300ms' }} /></div></div>)}
-        </div>
-        <div className="border-t border-line p-3">
-          <form onSubmit={e => { e.preventDefault(); send(input); }} className="flex gap-2">
-            <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }} placeholder="Tanya soal player, faction, ping…" rows={1} className="flex-1 resize-none rounded-lg border border-line bg-card px-3 py-2 text-[13px] text-main placeholder-subtle outline-none transition focus:border-accent/50 focus:ring-2 focus:ring-accent/15" />
-            <button type="submit" disabled={sending || !input.trim()} className="flex shrink-0 items-center justify-center rounded-lg bg-accent px-3 text-accent-text transition hover:bg-accent-hover disabled:opacity-30"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg></button>
-          </form>
-        </div>
-      </aside>
-    </div>
+    <svg className={className} fill={filled ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+    </svg>
   );
 }
-
-/* ══════════════ UI Bits & Icons ══════════════ */
-function Stat({ label, value, accent, small, pulse, delta }: any) {
-  return (
-    <div className="rounded-xl border border-line bg-card p-4 shadow-sm">
-      <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-subtle">
-        {pulse && (
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
-          </span>
-        )}
-        {label}
-      </div>
-      <div className="flex items-baseline gap-2">
-        <div className={`mt-1 truncate font-semibold ${accent} ${small ? 'text-base' : 'text-xl'}`}>{value}</div>
-        {delta !== null && delta !== undefined && delta !== 0 && (
-          <span className={`text-[10px] font-bold ${delta > 0 ? 'text-emerald-500' : 'text-red-500'}`}>{delta > 0 ? `+${delta}` : delta}</span>
-        )}
-      </div>
-    </div>
-  );
-}
-function SearchIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>); }
-function RefreshIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>); }
-function SparkIcon({ className }: any) { return (<svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z" /></svg>); }
-function GearIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>); }
-function ClockIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>); }
-function StarIcon({ className, filled }: any) { return (<svg className={className} fill={filled ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>); }
-function DownloadIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>); }
-function LinkIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>); }
-function BugIcon({ className }: any) { return (<svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>); }
