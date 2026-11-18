@@ -1,14 +1,15 @@
 // Simpan sebagai: .../api/relasi/scan/route.ts
-// Membaca screenshot KTP ("Los Santos Identity") lewat Anthropic Vision API.
-// Butuh ANTHROPIC_API_KEY di .env (jangan ditulis di kode). Tanpa key, form tetap bisa diisi manual.
+// Membaca screenshot KTP ("Los Santos Identity") lewat endpoint AI OpenAI-compatible.
+// Butuh AI_API_KEY di .env / environment Vercel. Tanpa key, form tetap bisa diisi manual.
 import { NextResponse } from 'next/server';
 import { getStaff } from '@/src/lib/staff';
 import { rateLimit } from '@/src/lib/rateLimit';
 
 export const maxDuration = 30;
 
-const MODEL = process.env.RELASI_SCAN_MODEL || 'deepseek-v4-flash-vision-exp';
-const MAX_B64 = 4_000_000; // ± 3 MB gambar; batas payload agar tidak membebani server
+const BASE_URL = 'https://bandelbanget.xyz/v1';
+const MODEL = process.env.RELASI_SCAN_MODEL || process.env.AI_MODEL || 'deepseek-v4-flash-vision-exp';
+const MAX_B64 = 4_000_000; // ± 3 MB gambar
 const MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 const PROMPT = `Ini screenshot game GTA/FiveM yang berisi kartu identitas "Los Santos Identity".
@@ -26,38 +27,65 @@ export async function POST(req: Request) {
   if (!staff) return fail('Tidak diizinkan.', 401);
   if (!rateLimit(`relasi:scan:${staff.deviceId}`, 8, 60_000)) return fail('Terlalu banyak scan, coba lagi sebentar.', 429);
 
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return fail('Scan otomatis belum dikonfigurasi (ANTHROPIC_API_KEY). Isi data secara manual.', 501);
+  const key = process.env.AI_API_KEY;
+  if (!key) return fail('Scan otomatis belum dikonfigurasi (AI_API_KEY). Isi data secara manual.', 501);
 
   const body = await req.json().catch(() => null);
   const image = typeof body?.image === 'string' ? body.image : '';
   const mime = typeof body?.mime === 'string' && MIMES.has(body.mime) ? body.mime : null;
-  if (!image || !mime || image.length > MAX_B64 || !/^[A-Za-z0-9+/=]+$/.test(image)) return fail('Gambar tidak valid atau terlalu besar.', 400);
+  if (!image || !mime || image.length > MAX_B64 || !/^[A-Za-z0-9+/=]+$/.test(image)) {
+    return fail('Gambar tidak valid atau terlalu besar.', 400);
+  }
+
+  // Format OpenAI-compatible: image disisipkan sebagai data URL di content image_url
+  const dataUrl = `data:${mime};base64,${image}`;
 
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 25_000); // timeout: jangan biarkan request menggantung
+  const timer = setTimeout(() => ctrl.abort(), 25_000);
+
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch(`${BASE_URL}/chat/completions`, {
       method: 'POST',
       signal: ctrl.signal,
-      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`,
+      },
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 400,
-        messages: [{ role: 'user', content: [
-          { type: 'image', source: { type: 'base64', media_type: mime, data: image } },
-          { type: 'text', text: PROMPT },
-        ] }],
+        temperature: 0,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: dataUrl } },
+              { type: 'text', text: PROMPT },
+            ],
+          },
+        ],
       }),
     });
-    if (!res.ok) return fail(`Layanan scan gagal (${res.status}). Isi data secara manual.`, 502);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.error('[relasi/scan] upstream', res.status, errText.slice(0, 300));
+      return fail(`Layanan scan gagal (${res.status}). Isi data secara manual.`, 502);
+    }
 
     const out: any = await res.json();
-    const text: string = (out?.content ?? []).filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('');
+    // Ambil content dari choices[0].message.content (OpenAI format)
+    let text: string = out?.choices?.[0]?.message?.content ?? '';
+    // Buang tag <think>...</think> kalau model reasoning dipakai
+    text = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
     const m = text.match(/\{[\s\S]*\}/);
     let raw: any = null;
     try { raw = m ? JSON.parse(m[0]) : null; } catch { raw = null; }
-    if (!raw) return fail('KTP tidak terbaca. Coba screenshot yang lebih jelas.', 422);
+    if (!raw) {
+      console.error('[relasi/scan] AI bukan JSON:', text.slice(0, 300));
+      return fail('KTP tidak terbaca. Coba screenshot yang lebih jelas.', 422);
+    }
 
     // Sanitasi: jangan percaya output model mentah-mentah
     const dob = clip(raw.dob, 10);
@@ -74,6 +102,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ data });
   } catch (e: any) {
     if (e?.name === 'AbortError') return fail('Scan terlalu lama (timeout). Coba lagi.', 504);
+    console.error('[relasi/scan]', e);
     return fail('Scan gagal. Isi data secara manual.', 502);
   } finally {
     clearTimeout(timer);
