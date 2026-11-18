@@ -34,3 +34,23 @@ export async function audit(staff: StaffInfo, action: string, target: string, de
     await (prisma as any).auditLog.create({ data: { adminName: staff.name, action, targetDeviceId: target, details } });
   } catch { /* abaikan */ }
 }
+
+/**
+ * Anggota yang boleh memakai fitur umum (mis. Tanya AI): staf, atau user yang sudah di-ACC dan tidak sedang timeout.
+ * Fail-closed. ⚠ SESUAIKAN nama model: saya asumsikan `prisma.accessRequest` (tipe AccessRequest di page.tsx).
+ */
+export async function getMember(req: Request): Promise<{ deviceId: string } | null> {
+  const staff = await getStaff(req);
+  if (staff) return { deviceId: staff.deviceId };
+
+  const deviceId = req.headers.get('x-device-id')?.trim();
+  if (!deviceId || deviceId.length > 100) return null;
+  try {
+    const r = await (prisma as any).accessRequest.findFirst({ where: { deviceId, status: 'APPROVED' } });
+    if (!r) return null;
+    if (r.timeoutUntil && new Date(r.timeoutUntil) > new Date()) return null;
+    return { deviceId };
+  } catch {
+    return null;
+  }
+}
