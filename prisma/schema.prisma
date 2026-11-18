@@ -44,6 +44,26 @@ model AuditLog {
   createdAt      DateTime @default(now())
 }
 
+model Relasi {
+  id          String   @id @default(cuid())
+  citizenId   String   @unique            // unik di level DB (anti duplikat / race condition)
+  firstName   String
+  lastName    String
+  dob         String?                     // YYYY-MM-DD
+  sex         String?                     // MALE | FEMALE
+  nationality String?
+  rank        String?                     // jabatan di CC, mis. Caporegime
+  relation    String?                     // keterangan hubungan
+  notes       String?
+  active      Boolean  @default(true)
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([active])                       // filter aktif/nonaktif
+  @@index([lastName, firstName])          // pencarian / urutan nama
+}
+
 // <-- BARU: Tabel Faction -->
 model Faction {
   id        String   @id @default(uuid())
