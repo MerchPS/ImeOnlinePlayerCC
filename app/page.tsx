@@ -348,6 +348,9 @@ export default function App() {
 /* ═════════ [A] Mod Selection Screen (animasi) ═════════ */
 type Mode = 'ALL' | 'CC';
 
+/* Taruh GIF di public/ime-server-up.gif (jangan hotlink Discord: link-nya kedaluwarsa) */
+const IME_GIF = '/ime-server-up.gif';
+
 const MS_CSS = `
 @property --a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
 @keyframes ms-aurora { 0%,100% { transform: translate3d(0,0,0) scale(1); } 50% { transform: translate3d(7%,-9%,0) scale(1.18); } }
@@ -399,11 +402,16 @@ const MS_CSS = `
 .ms-go span { display: inline-block; transition: transform .3s cubic-bezier(.32,.72,0,1); }
 .ms-card:hover .ms-go span { transform: translateX(6px); }
 .ms-ripple { position: fixed; z-index: 50; width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 9999px; pointer-events: none; animation: ms-ripple .85s cubic-bezier(.7,0,.3,1) forwards; }
+.ms-hero { animation: ms-rise 1s cubic-bezier(.2,.8,.2,1) backwards; }
+.ms-bg { animation: ms-fadein 1.6s ease backwards; }
+@keyframes ms-fadein { from { opacity: 0; } }
+.ms-badge { position: absolute; top: 16px; right: 16px; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 9999px; font-size: 11px; font-weight: 600; color: rgb(var(--tint)); background: rgba(var(--tint), .14); border: 1px solid rgba(var(--tint), .35); animation: ms-drop .6s ease .9s backwards; }
+.ms-badge i { width: 6px; height: 6px; border-radius: 9999px; background: rgb(var(--tint)); animation: ms-blink 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .ms-root *, .ms-root *::before { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
 `;
 
-function ModeCard({ title, desc, tint, tilt, delay, icon, state, onPick }: {
-  title: string; desc: string; tint: string; tilt: string; delay: string; icon: string;
+function ModeCard({ title, desc, tint, tilt, delay, icon, badge, state, onPick }: {
+  title: string; desc: string; tint: string; tilt: string; delay: string; icon: string; badge?: string;
   state: 'idle' | 'picked' | 'dim'; onPick: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
@@ -429,6 +437,7 @@ function ModeCard({ title, desc, tint, tilt, delay, icon, state, onPick }: {
       style={{ ['--tint' as string]: tint, ['--delay' as string]: delay, ['--tilt' as string]: tilt }}
     >
       <span className="ms-shine" />
+      {badge && <span className="ms-badge"><i />{badge}</span>}
       <div className="ms-icon">
         <svg width="40" height="40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={icon} /></svg>
       </div>
@@ -441,8 +450,27 @@ function ModeCard({ title, desc, tint, tilt, delay, icon, state, onPick }: {
 
 function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: Mode) => void }) {
   const [picked, setPicked] = useState<{ mode: Mode; x: number; y: number } | null>(null);
+  const [gifOk, setGifOk] = useState(true);
+  const [stats, setStats] = useState<{ all: number; cc: number } | null>(null);
 
-  const particles = useMemo(() => Array.from({ length: 28 }, (_, i) => ({
+  // Jumlah online langsung di kartu (pakai aturan deteksi faction yang sama dengan dashboard)
+  useEffect(() => {
+    let off = false;
+    Promise.all([
+      fetch('/api/players', { cache: 'no-store' }).then(r => r.json()),
+      fetch('/api/factions').then(r => (r.ok ? r.json() : [])).catch(() => []),
+    ]).then(([pl, fc]) => {
+      if (off || !pl?.ok) return;
+      const facs = mergeFactions(Array.isArray(fc) ? fc : []);
+      const ms = buildMatchers(facs);
+      const ccIds = new Set(facs.filter(f => f.short.split(',').map(clean).includes('CC')).map(f => f.id));
+      const cc = (pl.players as Player[]).filter(p => ccIds.has(detectFaction(p.name, ms))).length;
+      setStats({ all: pl.online, cc });
+    }).catch(() => { /* kartu tetap tampil tanpa angka */ });
+    return () => { off = true; };
+  }, []);
+
+  const particles = useMemo(() => Array.from({ length: 24 }, (_, i) => ({
     left: (i * 37) % 100, size: 2 + (i % 4), dur: 9 + (i % 7) * 2, delay: -((i * 1.7) % 12), drift: ((i % 5) - 2) * 18,
   })), []);
 
@@ -459,32 +487,48 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
     <div className="ms-root relative flex min-h-screen items-center justify-center overflow-hidden bg-[#05060a] p-4 font-sans" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
       <style>{MS_CSS}</style>
 
-      <div className="ms-blob" style={{ top: '-18%', left: '-12%', width: '52%', height: '52%', background: 'rgba(239,68,68,.30)' }} />
-      <div className="ms-blob" style={{ bottom: '-20%', right: '-12%', width: '55%', height: '55%', background: 'rgba(59,130,246,.30)', animationDelay: '-6s' }} />
-      <div className="ms-blob" style={{ top: '30%', left: '38%', width: '30%', height: '30%', background: 'rgba(168,85,247,.18)', animationDelay: '-10s' }} />
+      {/* GIF IME Roleplay sebagai latar penuh (diredupkan agar teks tetap terbaca) */}
+      {gifOk && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={IME_GIF} alt="" aria-hidden onError={() => setGifOk(false)} draggable={false} className="ms-bg pointer-events-none absolute inset-0 h-full w-full scale-105 select-none object-cover opacity-35 blur-[3px]" />
+      )}
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#05060a]/60 via-[#05060a]/80 to-[#05060a]" />
+
+      <div className="ms-blob" style={{ top: '-18%', left: '-12%', width: '52%', height: '52%', background: 'rgba(239,68,68,.22)' }} />
+      <div className="ms-blob" style={{ bottom: '-20%', right: '-12%', width: '55%', height: '55%', background: 'rgba(59,130,246,.22)', animationDelay: '-6s' }} />
       <div className="ms-grid" />
       {particles.map((p, i) => (
         <span key={i} className="ms-dot" style={{ left: `${p.left}%`, width: p.size, height: p.size, animationDuration: `${p.dur}s`, animationDelay: `${p.delay}s`, ['--d' as string]: `${p.drift}px` }} />
       ))}
 
       <div className="relative z-10 w-full max-w-4xl">
-        <div className="ms-head mb-10 text-center sm:mb-14" style={{ opacity: picked ? 0 : 1, transition: 'opacity .4s' }}>
-          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/70 backdrop-blur-xl">
-            <span className="ms-live" /> {role === 'SUPER' ? 'Akses Super Admin' : 'Akses Moderator'}
+        <div className="mb-10 text-center sm:mb-12" style={{ opacity: picked ? 0 : 1, transition: 'opacity .4s' }}>
+          {gifOk && (
+            <div className="ms-hero mx-auto mb-6 w-fit max-w-full overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-1.5 shadow-[0_0_80px_-20px_rgba(239,68,68,.55)] backdrop-blur-xl">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={IME_GIF} alt="IME Roleplay" onError={() => setGifOk(false)} draggable={false} className="max-h-32 w-auto max-w-full rounded-[20px] object-contain sm:max-h-44" />
+            </div>
+          )}
+          <div className="ms-head">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/70 backdrop-blur-xl">
+              <span className="ms-live" /> {role === 'SUPER' ? 'Akses Super Admin' : 'Akses Moderator'}
+            </div>
+            <h1 className="ms-title mb-3 text-4xl font-bold tracking-tight sm:text-6xl">Mau pantau apa hari ini?</h1>
+            <p className="text-base text-white/50 sm:text-lg">Kamu bisa ganti pilihan ini kapan saja lewat tombol Ganti Mode.</p>
           </div>
-          <h1 className="ms-title mb-3 text-4xl font-bold tracking-tight sm:text-6xl">Mau pantau apa hari ini?</h1>
-          <p className="text-base text-white/50 sm:text-lg">Kamu bisa ganti pilihan ini kapan saja lewat tombol Ganti Mode.</p>
         </div>
 
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-6">
           <ModeCard
             title="Crimson Creed Only" desc="Fokus memantau dan menganalisis anggota Crimson Creed saja."
             tint="239,68,68" tilt="-6deg" delay=".25s" state={stateOf('CC')} onPick={e => choose('CC', e)}
+            badge={stats ? `${stats.cc} online` : undefined}
             icon="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
           />
           <ModeCard
             title="All Factions" desc="Lihat semua player: semua faction, Civilian, serta Good dan Bad Side."
             tint="59,130,246" tilt="6deg" delay=".4s" state={stateOf('ALL')} onPick={e => choose('ALL', e)}
+            badge={stats ? `${stats.all} online` : undefined}
             icon="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
           />
         </div>
