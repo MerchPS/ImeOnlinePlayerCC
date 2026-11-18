@@ -233,7 +233,8 @@ export default function App() {
         const res = await fetch(`/api/auth/status?deviceId=${deviceId}`);
         const json = await res.json();
         setAuthStatus(json.status);
-        setRole(json.role === 'MOD' ? 'MOD' : 'SUPER');
+        const r = String(json.role ?? '').toUpperCase();
+        setRole(r.includes('SUPER') ? 'SUPER' : r.includes('MOD') ? 'MOD' : 'SUPER');
         setAuthMeta({ timeoutUntil: json.timeoutUntil, reason: json.reason });
       } catch { setAuthStatus('UNAUTHORIZED'); }
     };
@@ -294,8 +295,8 @@ export default function App() {
   }
 
   // Layar pemilihan mode untuk MODERATOR
-  if (role === 'MOD' && viewMode === null) {
-    return <ModSelectionScreen onSelect={(mode) => setViewMode(mode)} />;
+  if (authStatus === 'ADMIN' && viewMode === null) {
+    return <ModSelectionScreen role={role} onSelect={(mode) => setViewMode(mode)} />;
   }
 
   return (
@@ -432,7 +433,7 @@ function ModeCard({ title, desc, tint, tilt, delay, icon, state, onPick }: {
   );
 }
 
-function ModSelectionScreen({ onSelect }: { onSelect: (mode: Mode) => void }) {
+function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: Mode) => void }) {
   const [picked, setPicked] = useState<{ mode: Mode; x: number; y: number } | null>(null);
 
   const particles = useMemo(() => Array.from({ length: 28 }, (_, i) => ({
@@ -463,7 +464,7 @@ function ModSelectionScreen({ onSelect }: { onSelect: (mode: Mode) => void }) {
       <div className="relative z-10 w-full max-w-4xl">
         <div className="ms-head mb-10 text-center sm:mb-14" style={{ opacity: picked ? 0 : 1, transition: 'opacity .4s' }}>
           <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/70 backdrop-blur-xl">
-            <span className="ms-live" /> Akses moderator
+            <span className="ms-live" /> {role === 'SUPER' ? 'Akses Super Admin' : 'Akses Moderator'}
           </div>
           <h1 className="ms-title mb-3 text-4xl font-bold tracking-tight sm:text-6xl">Mau pantau apa hari ini?</h1>
           <p className="text-base text-white/50 sm:text-lg">Kamu bisa ganti pilihan ini kapan saja lewat tombol Ganti Mode.</p>
@@ -1504,7 +1505,8 @@ function Home({ isAdmin, role, viewMode, onSwitchMode, settings, onOpenSettings,
   }, [counts, activeCat, factions, activeGroup, viewMode]);
 
   // Hitungan nav di mode CC harus mengikuti jumlah anggota CC, bukan semua player
-  const ccCount = useMemo(() => enriched.filter(p => ccIds.has(p.faction)).length, [enriched, ccIds]);
+  const ccMembers = useMemo(() => enriched.filter(p => ccIds.has(p.faction)), [enriched, ccIds]);
+  const ccCount = ccMembers.length;
   const navCount = (id: string) => (viewMode === 'CC' ? ccCount : counts[id] ?? 0);
 
   const isWarning = countdown && countdown.diffMs < 30 * 60 * 1000;
@@ -1594,7 +1596,7 @@ function Home({ isAdmin, role, viewMode, onSwitchMode, settings, onOpenSettings,
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {role === 'MOD' && (
+            {isAdmin && (
               <button
                 onClick={onSwitchMode}
                 className="flex h-8 items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-3 text-red-500 transition hover:bg-red-500/20"
@@ -1631,6 +1633,8 @@ function Home({ isAdmin, role, viewMode, onSwitchMode, settings, onOpenSettings,
         {factionsError && (
           <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-500">Daftar faction dari server gagal dimuat — memakai daftar bawaan.</div>
         )}
+
+        {viewMode === 'CC' && <CCPanel members={ccMembers} sessionMs={sessionMs} watch={watch} missing={ccIds.size === 0} />}
 
         <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat label="Online" value={data ? fmt(data.online) : '—'} accent="text-emerald-500" pulse delta={delta} />
@@ -2032,5 +2036,57 @@ function StarIcon({ className, filled }: { className?: string; filled?: boolean 
     <svg className={className} fill={filled ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
     </svg>
+  );
+}
+
+/* ── Panel khusus Crimson Creed (muncul di mode CC) ── */
+function CCPanel({ members, sessionMs, watch, missing }: { members: EnrichedPlayer[]; sessionMs: (n: string) => number; watch: Set<string>; missing: boolean }) {
+  const online = members.length;
+  const avgPing = online ? Math.round(members.reduce((a, p) => a + p.ping, 0) / online) : 0;
+  const maxPing = online ? Math.max(...members.map(p => p.ping)) : 0;
+  const watched = members.filter(p => watch.has(p.name)).length;
+  const longest = [...members].sort((a, b) => sessionMs(b.name) - sessionMs(a.name)).slice(0, 5);
+  const cells: { label: string; value: string; cls: string }[] = [
+    { label: 'Anggota online', value: String(online), cls: 'text-red-400' },
+    { label: 'Rata-rata ping', value: online ? `${avgPing} ms` : '—', cls: 'text-main' },
+    { label: 'Ping tertinggi', value: online ? `${maxPing} ms` : '—', cls: maxPing >= 150 ? 'text-red-500' : 'text-main' },
+    { label: 'Di watchlist', value: String(watched), cls: 'text-amber-500' },
+  ];
+  return (
+    <section className="ios-enter mb-6 overflow-hidden rounded-2xl border border-red-500/30 bg-gradient-to-br from-red-500/10 via-card to-card p-4 sm:p-5">
+      <div className="mb-4 flex items-center gap-3">
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/20 text-red-500">
+          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+        </span>
+        <div>
+          <div className="text-sm font-semibold text-main">Panel Crimson Creed</div>
+          <div className="text-[11px] text-muted">Ringkasan anggota CC yang sedang online</div>
+        </div>
+      </div>
+      {missing && <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">Faction dengan Short &quot;CC&quot; belum ada. Tambahkan di Admin Panel &gt; Factions.</div>}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {cells.map(c => (
+          <div key={c.label} className="rounded-xl bg-hover/70 px-3 py-2.5">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">{c.label}</div>
+            <div className={`mt-0.5 text-xl font-semibold ${c.cls}`}>{c.value}</div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4">
+        <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-subtle">Online terlama</div>
+        {longest.length === 0 ? (
+          <div className="py-3 text-center text-xs text-subtle">Belum ada anggota CC yang online.</div>
+        ) : (
+          <div className="space-y-1.5">
+            {longest.map(p => (
+              <div key={p.id} className="flex items-center justify-between rounded-lg bg-hover/50 px-3 py-2 text-[13px]">
+                <span className="truncate text-main">{p.name}</span>
+                <span className="ml-3 shrink-0 font-mono text-[11px] text-muted">{fmtDuration(sessionMs(p.name))}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
