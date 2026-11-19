@@ -15,6 +15,14 @@ model User {
   createdAt DateTime @default(now())
 }
 
+model AdminUser {
+  id        String   @id @default(uuid())
+  deviceId  String   @unique
+  name      String
+  role      String   @default("MOD")
+  createdAt DateTime @default(now())
+}
+
 model AccessRequest {
   id              String    @id @default(uuid())
   ipAddress       String
