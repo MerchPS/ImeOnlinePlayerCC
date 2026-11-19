@@ -64,6 +64,39 @@ model Relasi {
   @@index([lastName, firstName])          // pencarian / urutan nama
 }
 
+// Tambahkan ke prisma/schema.prisma, lalu jalankan:
+//   npx prisma migrate dev --name add_ai_usage      (atau: npx prisma db push)
+//   npx prisma generate
+
+// Ringkasan pemakaian token per hari / fitur / perangkat. Satu baris per kombinasi,
+// diisi lewat upsert + increment (atomik), jadi tabel tidak membengkak.
+model AiUsageDaily {
+  id               String   @id @default(cuid())
+  day              String                       // YYYY-MM-DD (WIB)
+  endpoint         String                       // "chat" | "faction"
+  deviceId         String                       // "-" jika tidak ada
+  calls            Int      @default(0)         // panggilan ke provider AI
+  cacheHits        Int      @default(0)         // nama yang dijawab dari cache (0 token)
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  errors           Int      @default(0)
+  estimated        Int      @default(0)         // panggilan yang tokennya diperkirakan (provider tak kirim usage)
+  updatedAt        DateTime @updatedAt
+
+  @@unique([day, endpoint, deviceId])
+  @@index([day])
+}
+
+// Cache bersama hasil klasifikasi faction (nama player -> faction), berlaku lintas user.
+model AiFactionCache {
+  name      String   @id                       // nama player, lowercase + trim
+  factionId String                             // id faction atau "WARGA"
+  sig       String                             // tanda tangan daftar faction saat diklasifikasi
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
 // <-- BARU: Tabel Faction -->
 model Faction {
   id        String   @id @default(uuid())
