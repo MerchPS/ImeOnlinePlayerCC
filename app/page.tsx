@@ -19,6 +19,14 @@ type Settings = { theme: Theme; refreshMs: number; compact: boolean; tagStyle: '
 type EnrichedPlayer = Player & { faction: string; side: Side | 'CIVIL' };
 type SessionRec = { start: number | null; last: number; total: number; count: number };
 type AiFactionCache = Record<string, { faction: string; t: number }>;
+type AiStats = {
+  config: { total: number; faction: number; factionEnabled: boolean };
+  today: { tokens: number; input: number; output: number; calls: number; cacheHits: number; errors: number; estimatedCalls: number; chat: number; faction: number };
+  days: { day: string; chat: number; faction: number }[];
+  last7: number; last14: number;
+  topDevices: { deviceId: string; tokens: number; calls: number }[];
+  cacheRows: number;
+};
 type HistoryPoint = { t: number; online: number };
 type ToastItem = { id: number; text: string; kind: 'info' | 'good' | 'bad' | 'watch' };
 type SortKey = 'id' | 'name' | 'ping' | 'session';
@@ -34,7 +42,7 @@ const WARGA: FactionDef = {
 };
 
 const FALLBACK_FACTIONS: FactionDef[] = [
-  // 🔧 FIX: CC sekarang multi-alias supaya "CCxKERTA", "CCX ashley", "Crimson Creed" semua kebaca
+  // CC multi-alias supaya "CCxKERTA", "CCX ashley", "Crimson Creed" semua kebaca
   { id: 'cc', label: 'Crimson Creed', short: 'CC,CCX,CRIMSON', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#2a1515] text-[#f08a8a] border-[#5a2525]', dot: 'bg-[#ef4444]' },
   { id: 'bmc', label: 'BMC', short: 'BMC', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#2a1a2e] text-[#d89ee8] border-[#4a2555]', dot: 'bg-[#c96ce8]' },
   { id: 'cbmc', label: 'CBMC', short: 'CBMC', matchType: 'STARTS_WITH', side: 'BAD', badge: 'bg-[#2e1a2a] text-[#e89ec9] border-[#55254a]', dot: 'bg-[#e86caa]' },
@@ -50,7 +58,7 @@ const FALLBACK_FACTIONS: FactionDef[] = [
 ];
 
 const GOOD_SIDE_SHORTS = ['GOV', 'LSPD', 'DOC', 'LSSD', 'MEDIC', 'RH', 'ICR', 'DOJ', '#IME', 'UNA', '969G', 'RB'];
-// 🔧 FIX: CCX ditambahkan supaya side resolver tahu CCX = BAD
+// CCX/CRIMSON ditambahkan supaya side resolver tahu CC = BAD
 const BAD_SIDE_SHORTS = ['CC', 'CCX', 'CRIMSON', '4B', 'JRZ', 'HT', 'HTH', 'BURGENK', 'DTF', 'ALLSTAR', 'ALLSTARS', 'NSN', 'WT', '24S', 'OMC', '5TAR', 'MX', 'RCMC', 'RC1', 'BMC', 'CBMC', 'RAGE', 'ALTION', 'NN', 'SIN', 'MFL', 'DW', 'RSG', 'BDF'];
 
 const SESSION_GAP_MS = 15 * 60 * 1000;
@@ -148,22 +156,53 @@ function buildMatchers(factions: FactionDef[]): Matcher[] {
 /* Pecah nama jadi kata-kata utuh (dipisah spasi, simbol, atau tanda baca) */
 const nameTokens = (s: string) => s.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
 
-/* 🔧 FIX: pencocokan per KATA + prefix support.
-   - Cek exact token dulu (tag utuh di mana pun: "VINCI CC", "CC - Name", "[CC] Name")
-   - Lalu cek prefix pada token PERTAMA: menangani "CCxKERTA", "MX69", "BMCxxx", dll.
-   - Nama dengan pemisah " - " hanya dicek bagian sebelum pemisah (tag faction). */
+/* Pencocokan per KATA:
+   1) exact token di mana pun ("VINCI CC", "CC - Name", "[CC] Name")
+   2) awalan menempel pada kata PERTAMA ("CCxKERTA", "MX69"), tetapi hanya jika awalannya ditulis KAPITAL.
+      Jadi "Dwi Saputra" / "Sinta" tidak salah masuk DW / SIN.
+   Nama dengan pemisah " - " hanya dicek bagian sebelum pemisah (tag faction). */
 function detectFaction(name: string, matchers: Matcher[]): string {
   const scope = name.includes(' - ') ? name.split(' - ')[0] : name;
   const toks = nameTokens(scope);
   if (toks.length === 0) return 'WARGA';
   const first = toks[0];
+  const rawFirst = (scope.match(/[A-Za-z0-9]+/) ?? [''])[0];
   for (const m of matchers) {
-    // Prioritas 1: exact token di mana pun dalam nama
     if (toks.includes(m.alias)) return m.id;
-    // Prioritas 2: prefix pada token PERTAMA (menangani "CCxKERTA" → CC)
-    if (first.startsWith(m.alias)) return m.id;
+    if (first.length > m.alias.length && first.startsWith(m.alias) && rawFirst.slice(0, m.alias.length) === m.alias) return m.id;
   }
   return 'WARGA';
+}
+
+/* ───── HEMAT TOKEN: gerbang sebelum nama dikirim ke AI ───── */
+const AI_MIN_INTERVAL = 3 * 60_000;      // maksimal 1 panggilan AI / 3 menit / perangkat
+const AI_FAIL_COOLDOWN = 5 * 60_000;     // setelah error, tunggu 5 menit
+const AI_CLIENT_TTL = 24 * 3600_000;     // cache di perangkat 24 jam (server punya cache bersama 7 hari)
+const AI_BATCH = 30;
+
+function lev1(a: string, b: string): boolean {  // jarak edit <= 1
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
+  if (a.length > b.length) return a.slice(i + 1) === b.slice(i);
+  return b.slice(i + 1) === a.slice(i);
+}
+
+/* Nama layak ditanyakan ke AI hanya jika MENYERUPAI alias faction (mengandung, diawali, atau salah ketik 1 huruf).
+   Nama warga biasa ("Budi Santoso") tidak pernah dikirim: tidak ada token terbuang untuk jawaban "WARGA". */
+function aiCandidate(name: string, matchers: Matcher[]): boolean {
+  const squash = clean(name);
+  if (squash.length < 2) return false;
+  const first = nameTokens(name.includes(' - ') ? name.split(' - ')[0] : name)[0] ?? '';
+  for (const m of matchers) {
+    const al = m.alias;
+    if (al.length >= 3 && squash.includes(al)) return true;
+    if (al.length === 2 && squash.startsWith(al)) return true;
+    if (al.length >= 4 && first.length >= al.length - 1 && lev1(first.slice(0, al.length), al)) return true;
+  }
+  return false;
 }
 
 /* Relasi dianggap online jika SEMUA kata nama depan + belakang ada di nama player */
@@ -334,7 +373,7 @@ export default function App() {
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenAdmin={() => setAdminOpen(true)}
           />
-          {authStatus === 'ADMIN' && <AdminPanel open={adminOpen} role={role} onClose={() => setAdminOpen(false)} />}
+          {authStatus === 'ADMIN' && <AdminPanel open={adminOpen} role={role} deviceId={deviceId} onClose={() => setAdminOpen(false)} />}
         </div>
       </div>
 
@@ -889,9 +928,9 @@ function FactionTag({ fac, variant }: { fac: Pick<FactionDef, 'badge' | 'dot' | 
 type FactionForm = { id?: string; label: string; short: string; matchType: string; side: Side; color: string; badge: string; dot: string };
 const EMPTY_FORM: FactionForm = { label: '', short: '', matchType: 'INCLUDES', side: 'NONE', color: '#8b5cf6', badge: 'bg-gray-500/10 text-gray-500 border-gray-500/20', dot: 'bg-gray-500' };
 
-function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => void; role: Role }) {
+function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose: () => void; role: Role; deviceId: string }) {
   const isSuper = role === 'SUPER';
-  const [activeTab, setActiveTab] = useState<'requests' | 'factions' | 'audit' | 'admins' | 'reports'>('requests');
+  const [activeTab, setActiveTab] = useState<'requests' | 'factions' | 'audit' | 'admins' | 'reports' | 'ai'>('requests');
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('ALL');
@@ -910,6 +949,9 @@ function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => voi
   const [admins, setAdmins] = useState<AdminUser[]>([]);
   const [newAdmin, setNewAdmin] = useState<{ name: string; deviceId: string; role: Role }>({ name: '', deviceId: '', role: 'MOD' });
   const [reports, setReports] = useState<BugReport[]>([]);
+  const [aiStats, setAiStats] = useState<AiStats | null>(null);
+  const [aiError, setAiError] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -918,8 +960,13 @@ function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => voi
       else if (activeTab === 'factions') { const res = await fetch('/api/factions'); if (res.ok) setFactions(await res.json()); }
       else if (activeTab === 'admins') { const res = await fetch('/api/admin/admins'); if (res.ok) setAdmins(await res.json()); }
       else if (activeTab === 'reports') { const res = await fetch('/api/reports'); if (res.ok) setReports(await res.json()); }
+      else if (activeTab === 'ai') {
+        const res = await fetch('/api/admin/ai-usage', { headers: staffHeaders(deviceId, false), cache: 'no-store' });
+        if (res.ok) { setAiStats(await res.json()); setAiError(''); }
+        else { const j = await res.json().catch(() => ({})); setAiError(j.error || `status ${res.status}`); }
+      }
     } catch { /* abaikan */ }
-  }, [activeTab]);
+  }, [activeTab, deviceId]);
 
   useEffect(() => {
     if (!open) return;
@@ -990,6 +1037,16 @@ function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => voi
     fetchData();
   };
 
+  const clearAiServerCache = async () => {
+    if (!confirm('Kosongkan cache faction di server? Nama akan ditanyakan ulang ke AI (memakai token).')) return;
+    setAiBusy(true);
+    try {
+      const res = await fetch('/api/admin/ai-usage', { method: 'POST', headers: staffHeaders(deviceId), body: JSON.stringify({ action: 'CLEAR_CACHE' }) });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); alert(j.error || 'Gagal mengosongkan cache'); }
+      fetchData();
+    } finally { setAiBusy(false); }
+  };
+
   const toggleSelect = (id: string) => {
     const next = new Set(selected);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -1026,7 +1083,7 @@ function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => voi
   const tabs: { id: typeof activeTab; label: string }[] = [
     { id: 'requests', label: 'Users' },
     { id: 'reports', label: 'Reports' },
-    ...(isSuper ? [{ id: 'factions' as const, label: 'Factions' }, { id: 'audit' as const, label: 'Logs' }, { id: 'admins' as const, label: 'Admins' }] : []),
+    ...(isSuper ? [{ id: 'factions' as const, label: 'Factions' }, { id: 'audit' as const, label: 'Logs' }, { id: 'admins' as const, label: 'Admins' }, { id: 'ai' as const, label: 'AI' }] : []),
   ];
 
   return (
@@ -1052,6 +1109,104 @@ function AdminPanel({ open, onClose, role }: { open: boolean; onClose: () => voi
 
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         <div className="mx-auto max-w-6xl space-y-6">
+
+          {activeTab === 'ai' && isSuper && (
+            <div className="space-y-6">
+              {!aiStats ? (
+                <div className="py-16 text-center text-sm text-subtle">Memuat statistik AI…{aiError ? ` (${aiError})` : ''}</div>
+              ) : (() => {
+                const st = aiStats;
+                const maxDay = Math.max(1, ...st.days.map(d => d.chat + d.faction));
+                const budgets = [
+                  { label: 'Total semua fitur AI', used: st.today.tokens, cap: st.config.total, env: 'AI_DAILY_TOKEN_BUDGET' },
+                  { label: 'Auto-deteksi faction', used: st.today.faction, cap: st.config.faction, env: 'AI_FACTION_DAILY_BUDGET' },
+                ];
+                const cells = [
+                  { label: 'Panggilan AI hari ini', value: fmt(st.today.calls), cls: 'text-main' },
+                  { label: 'Nama dijawab cache (hemat)', value: fmt(st.today.cacheHits), cls: 'text-emerald-500' },
+                  { label: 'Error', value: fmt(st.today.errors), cls: st.today.errors ? 'text-red-500' : 'text-main' },
+                  { label: '7 hari terakhir', value: `${fmt(st.last7)} token`, cls: 'text-main' },
+                ];
+                return (
+                  <>
+                    <div className="rounded-xl border border-line bg-card p-5">
+                      <h3 className="mb-4 text-sm font-bold">Pemakaian token hari ini (WIB)</h3>
+                      {budgets.map(b => {
+                        const pct = b.cap > 0 ? Math.min(100, Math.round((b.used / b.cap) * 100)) : 0;
+                        return (
+                          <div key={b.label} className="mb-4 last:mb-0">
+                            <div className="mb-1 flex items-baseline justify-between text-xs">
+                              <span className="text-muted">{b.label}</span>
+                              <span className="font-mono text-main">{fmt(b.used)}{b.cap > 0 ? ` / ${fmt(b.cap)}` : ''}</span>
+                            </div>
+                            {b.cap > 0 ? (
+                              <div className="h-2 overflow-hidden rounded-full bg-hover"><div className={`h-full rounded-full transition-all ${pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${pct}%` }} /></div>
+                            ) : (
+                              <div className="text-[11px] text-amber-500">Belum ada batas harian. Isi {b.env} di Vercel supaya token tidak bisa bocor.</div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <div className="mt-3 text-[11px] text-subtle">Masuk {fmt(st.today.input)} · Keluar {fmt(st.today.output)}{st.today.estimatedCalls > 0 ? ` · ${st.today.estimatedCalls} panggilan berupa perkiraan (provider tidak mengirim usage)` : ''}</div>
+                      {!st.config.factionEnabled && <div className="mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-500">Auto-deteksi faction dimatikan (AI_FACTION_MATCH=off).</div>}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {cells.map(c => (
+                        <div key={c.label} className="rounded-xl border border-line bg-card px-4 py-3">
+                          <div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">{c.label}</div>
+                          <div className={`mt-1 text-xl font-semibold ${c.cls}`}>{c.value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="rounded-xl border border-line bg-card p-5">
+                      <div className="mb-3 flex items-center justify-between">
+                        <h3 className="text-sm font-bold">14 hari terakhir</h3>
+                        <div className="flex gap-3 text-[11px] text-muted"><span className="flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-accent" />Tanya AI</span><span className="flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-amber-500" />Deteksi faction</span></div>
+                      </div>
+                      <div className="flex h-32 gap-1.5">
+                        {st.days.map(d => {
+                          const tot = d.chat + d.faction;
+                          return (
+                            <div key={d.day} className="flex h-full flex-1 flex-col justify-end gap-1" title={`${d.day}: ${fmt(tot)} token (chat ${fmt(d.chat)}, faction ${fmt(d.faction)})`}>
+                              <div className="flex w-full flex-col-reverse overflow-hidden rounded-t bg-hover/40" style={{ height: `${Math.max(3, (tot / maxDay) * 88)}%` }}>
+                                <div className="bg-accent" style={{ height: tot ? `${(d.chat / tot) * 100}%` : 0 }} />
+                                <div className="bg-amber-500" style={{ height: tot ? `${(d.faction / tot) * 100}%` : 0 }} />
+                              </div>
+                              <span className="text-center text-[9px] text-subtle">{d.day.slice(8)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-6 md:grid-cols-2">
+                      <div className="rounded-xl border border-line bg-card p-5">
+                        <h3 className="mb-3 text-sm font-bold">Pengguna terboros hari ini</h3>
+                        {st.topDevices.length === 0 ? <div className="py-4 text-center text-xs text-subtle">Belum ada pemakaian.</div> : (
+                          <table className="w-full text-left text-xs">
+                            <thead className="text-[10px] uppercase tracking-wider text-subtle"><tr><th className="pb-2">Device</th><th className="pb-2 text-right">Panggilan</th><th className="pb-2 text-right">Token</th></tr></thead>
+                            <tbody>
+                              {st.topDevices.map(d => (
+                                <tr key={d.deviceId} className="border-t border-line"><td className="py-2 font-mono text-subtle" title={d.deviceId}>{d.deviceId === '-' ? '(tanpa ID)' : `${d.deviceId.slice(0, 8)}…`}</td><td className="py-2 text-right text-muted">{fmt(d.calls)}</td><td className="py-2 text-right font-mono text-main">{fmt(d.tokens)}</td></tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                      <div className="rounded-xl border border-line bg-card p-5">
+                        <h3 className="mb-3 text-sm font-bold">Cache faction di server</h3>
+                        <div className="text-3xl font-semibold text-main">{fmt(st.cacheRows)} <span className="text-sm font-normal text-muted">nama tersimpan</span></div>
+                        <p className="mt-2 text-[11px] leading-relaxed text-subtle">Nama yang sudah pernah dikenali dijawab dari sini tanpa memakai token, dan dipakai bersama semua user. Kosongkan hanya jika kamu mengubah aturan faction secara besar-besaran.</p>
+                        <button onClick={clearAiServerCache} disabled={aiBusy || st.cacheRows === 0} className="mt-4 rounded-lg bg-red-500/10 px-4 py-2 text-xs font-semibold text-red-500 hover:bg-red-500/20 disabled:opacity-40">{aiBusy ? 'Memproses…' : 'Kosongkan cache'}</button>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
 
           {activeTab === 'reports' && (
             <div className="rounded-xl border border-line bg-card overflow-hidden">
@@ -1406,23 +1561,19 @@ function Home({ isAdmin, deviceId, role, viewMode, onSwitchMode, settings, onOpe
   const [relasiLoading, setRelasiLoading] = useState(true);
   const [relasiOpen, setRelasiOpen] = useState(false);
 
-  // 🔧 BARU: cache hasil AI faction (nama → faction, TTL 6 jam)
+  // Cache hasil AI faction (nama -> faction), disimpan di perangkat
   const [aiCache, setAiCache] = useState<AiFactionCache>({});
   const aiLastFailRef = useRef(0);
+  const aiLastCallRef = useRef(0);
+  const aiBusyRef = useRef(false);
+  const aiPausedUntilRef = useRef(0);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('ime-ai-faction-cache');
-      if (raw) setAiCache(JSON.parse(raw));
-    } catch { /* ignore */ }
+    try { const raw = localStorage.getItem('ime-ai-faction-cache'); if (raw) setAiCache(JSON.parse(raw)); } catch { /* ignore */ }
   }, []);
-
   useEffect(() => {
-    try {
-      localStorage.setItem('ime-ai-faction-cache', JSON.stringify(aiCache));
-    } catch { /* ignore */ }
+    try { localStorage.setItem('ime-ai-faction-cache', JSON.stringify(aiCache)); } catch { /* ignore */ }
   }, [aiCache]);
-
   const clearAiCache = useCallback(() => {
     setAiCache({});
     try { localStorage.removeItem('ime-ai-faction-cache'); } catch { /* ignore */ }
@@ -1657,7 +1808,6 @@ function Home({ isAdmin, deviceId, role, viewMode, onSwitchMode, settings, onOpe
   const matchers = useMemo(() => buildMatchers(factions), [factions]);
   const factionMap = useMemo(() => { const m = new Map<string, FactionDef>(); factions.forEach(f => m.set(f.id, f)); return m; }, [factions]);
 
-  // 🔧 DIPERBARUI: enriched sekarang juga baca aiCache
   const enriched: EnrichedPlayer[] = useMemo(() => (data?.players ?? []).map(p => {
     let faction = detectFaction(p.name, matchers);
     if (faction === 'WARGA' && aiCache[p.name]) {
@@ -1668,58 +1818,52 @@ function Home({ isAdmin, deviceId, role, viewMode, onSwitchMode, settings, onOpe
     return { ...p, faction, side };
   }), [data, matchers, factionMap, aiCache]);
 
-  // 🔧 BARU: tanya AI untuk nama yang tidak dikenali lokal & belum ada di cache
+  // Tanya AI HANYA untuk nama yang menyerupai alias faction, belum ada di cache, dan hanya jika tab aktif.
   useEffect(() => {
-    if (!data?.players?.length || !factions.length) return;
-    if (Date.now() - aiLastFailRef.current < 60_000) return; // cooldown 1 menit kalau error
-
-    const TTL = 6 * 3600 * 1000;
+    if (!data?.players?.length || !factions.length || !deviceId) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
     const now = Date.now();
-    const unknown: string[] = [];
-    const seen = new Set<string>();
+    if (aiBusyRef.current || now < aiPausedUntilRef.current) return;
+    if (now - aiLastFailRef.current < AI_FAIL_COOLDOWN || now - aiLastCallRef.current < AI_MIN_INTERVAL) return;
 
+    const seen = new Set<string>();
+    const batch: string[] = [];
     for (const p of data.players) {
       if (!p.name || seen.has(p.name)) continue;
-      const c = aiCache[p.name];
-      if (c && now - c.t < TTL) continue;
-      if (detectFaction(p.name, matchers) !== 'WARGA') continue;
       seen.add(p.name);
-      unknown.push(p.name);
+      const c = aiCache[p.name];
+      if (c && now - c.t < AI_CLIENT_TTL) continue;
+      if (detectFaction(p.name, matchers) !== 'WARGA') continue;
+      if (!aiCandidate(p.name, matchers)) continue;
+      batch.push(p.name);
+      if (batch.length >= AI_BATCH) break;
     }
+    if (!batch.length) return;
 
-    if (!unknown.length) return;
-    const batch = unknown.slice(0, 20);
-
+    aiBusyRef.current = true;
+    aiLastCallRef.current = now;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 25_000);
 
     fetch('/api/ai/faction-match', {
       method: 'POST',
       signal: ctrl.signal,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        names: batch,
-        factions: factions.map(f => ({ id: f.id, label: f.label, short: f.short })),
-      }),
+      headers: staffHeaders(deviceId),
+      body: JSON.stringify({ names: batch, factions: factions.map(f => ({ id: f.id, label: f.label, short: f.short })) }),
     })
       .then(r => (r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`))))
-      .then((res: { assignments?: { name: string; factionId: string }[] }) => {
+      .then((res: { assignments?: { name: string; factionId: string }[]; disabled?: boolean; budgetExceeded?: boolean }) => {
+        if (res.disabled || res.budgetExceeded) aiPausedUntilRef.current = Date.now() + 30 * 60_000; // kuota habis / fitur mati: istirahat 30 menit
         const add: AiFactionCache = {};
         const t = Date.now();
-        for (const a of res.assignments ?? []) {
-          if (!a?.name) continue;
-          add[a.name] = { faction: a.factionId === 'WARGA' ? 'WARGA' : a.factionId, t };
-        }
+        for (const a of res.assignments ?? []) if (a?.name) add[a.name] = { faction: a.factionId, t };
         if (Object.keys(add).length) setAiCache(prev => ({ ...prev, ...add }));
       })
-      .catch((err) => {
-        aiLastFailRef.current = Date.now();
-        console.warn('[ai/faction-match] gagal:', err?.message ?? err);
-      })
-      .finally(() => clearTimeout(timer));
-    // aiCache sengaja tidak di-deps supaya tidak loop
+      .catch(err => { aiLastFailRef.current = Date.now(); console.warn('[ai/faction-match] gagal:', err?.message ?? err); })
+      .finally(() => { clearTimeout(timer); aiBusyRef.current = false; });
+    // aiCache sengaja tidak di deps supaya tidak loop
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, factions, matchers]);
+  }, [data, factions, matchers, deviceId]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { SEMUA: enriched.length, GOOD: 0, BAD: 0, CIVILIAN: 0 };
@@ -1748,50 +1892,18 @@ function Home({ isAdmin, deviceId, role, viewMode, onSwitchMode, settings, onOpe
   const filtered = useMemo(() => {
     let list = enriched;
 
-    // ⬇️⚠️⚠️ CATATAN PENTING ⚠️⚠️⚠️
-    // File page.tsx yang kamu kirim TERPOTONG tepat di sini (`if (viewMode === 'CC`).
-    // Saya isi dengan rekonstruksi paling masuk akal, TAPI kalau file aslimu punya
-    // blok filter tambahan (search, activeGroup, activeCat, sort, onlyWatch, dst.)
-    // — WAJIB copy-paste dari file asli kamu ke sini.
-    //
-    // Cari di file aslimu mulai dari baris `const filtered = useMemo(() => {` sampai
-    // kurung tutupnya, lalu replace SEMUA isi useMemo ini dengan versi aslimu.
-    // Sisanya (return JSX Home, panel AI, tabel, modal, dll.) juga tidak ada di
-    // file yang kamu kirim — paste juga dari file aslimu setelah blok `filtered` ini.
-
-    if (viewMode === 'CC') {
-      list = list.filter(p => ccIds.has(p.faction));
-    }
+    // Mode CC: hanya anggota Crimson Creed (kosong jika faction CC belum ada)
+    if (viewMode === 'CC') list = list.filter(p => ccIds.has(p.faction));
 
     if (activeGroup !== 'ALL') {
-      const target = activeGroup === 'CIVILIAN' ? 'CIVIL' : activeGroup;
-      list = list.filter(p => p.side === target);
+      list = list.filter(p => activeGroup === 'CIVILIAN' ? p.side === 'CIVIL' : p.side === activeGroup);
     }
-
-    if (activeCat !== 'SEMUA' && activeCat !== 'ALL') {
-      list = list.filter(p => p.faction === activeCat);
-    }
-
-    const q = search.trim().toLowerCase();
-    if (q) {
-      list = list.filter(p => p.name.toLowerCase().includes(q));
-    }
-
+    if (activeCat !== 'SEMUA') list = list.filter(p => p.faction === activeCat);
     if (onlyWatch) list = list.filter(p => watch.has(p.name));
-
-    if (sortKey) {
-      const dir = sortDir === 'asc' ? 1 : -1;
-      list = [...list].sort((a, b) => {
-        if (sortKey === 'id') return (a.id - b.id) * dir;
-        if (sortKey === 'ping') return (a.ping - b.ping) * dir;
-        if (sortKey === 'name') return a.name.localeCompare(b.name) * dir;
-        if (sortKey === 'session') return (sessionMs(a.name) - sessionMs(b.name)) * dir;
-        return 0;
-      });
-    }
-
+    const q = search.trim().toLowerCase();
+    if (q) list = list.filter(p => p.name.toLowerCase().includes(q) || String(p.id).includes(q));
     return list;
-  }, [enriched, viewMode, ccIds, activeGroup, activeCat, search, onlyWatch, watch, sortKey, sortDir, sessionMs]);
+  }, [enriched, activeGroup, activeCat, search, onlyWatch, watch, viewMode, ccIds]);
 
   const sorted = useMemo(() => {
     if (!sortKey) return filtered;
@@ -2232,7 +2344,7 @@ function AIDrawer({ open, onClose, data, enriched, counts, activeCat, factionMap
   const context = useMemo(() => {
     if (!open || !data) return '';
     const perFaction = Array.from(factionMap.values()).filter(f => (counts[f.id] ?? 0) > 0).map(f => `${f.label}: ${counts[f.id]}`).join(', ');
-    const list = enriched.slice(0, 150).map(p => `#${p.id} ${p.name} [${p.faction}/${p.side}] ping ${p.ping}`).join('\n');
+    const list = enriched.slice(0, 100).map(p => `#${p.id} ${p.name} [${p.faction}/${p.side}] ping ${p.ping}`).join('\n');
     return `Online: ${data.online}/${data.max}. Good: ${counts.GOOD}, Bad: ${counts.BAD}, Civilian: ${counts.CIVILIAN}. Kategori aktif: ${activeCat}.\nPer faction: ${perFaction}\nDaftar player:\n${list}`;
   }, [open, data, enriched, counts, activeCat, factionMap]);
 
