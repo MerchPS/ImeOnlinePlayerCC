@@ -239,7 +239,8 @@ function renderMarkdown(text: string) {
 /* ══════════════ Main App Component ══════════════ */
 export default function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>('LOADING');
-  const [role, setRole] = useState<Role>('SUPER');
+  // FIX: default role jadi MOD, bukan SUPER (aman sebelum status auth termuat)
+  const [role, setRole] = useState<Role>('MOD');
   const [deviceId, setDeviceId] = useState<string>('');
   const [authMeta, setAuthMeta] = useState<{ timeoutUntil?: string; reason?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -292,11 +293,21 @@ export default function App() {
       try {
         const res = await fetch(`/api/auth/status?deviceId=${deviceId}`);
         const json = await res.json();
-        setAuthStatus(json.status);
+
+        // FIX: validasi status agar nilai tak dikenal tidak lolos ke render
+        const validStatuses: AuthStatus[] = ['LOADING', 'UNAUTHORIZED', 'PENDING', 'APPROVED', 'ADMIN', 'BANNED', 'TIMEOUT'];
+        const status = String(json?.status ?? '').toUpperCase() as AuthStatus;
+        setAuthStatus(validStatuses.includes(status) ? status : 'UNAUTHORIZED');
+
+        // FIX: fallback ke MOD (bukan SUPER). Hanya role yang benar-benar berisi
+        // "SUPER" yang dianggap super admin. MOD / nilai kosong → tetap MOD.
         const r = String(json.role ?? '').toUpperCase();
-        setRole(r.includes('SUPER') ? 'SUPER' : r.includes('MOD') ? 'MOD' : 'SUPER');
+        setRole(r.includes('SUPER') ? 'SUPER' : 'MOD');
+
         setAuthMeta({ timeoutUntil: json.timeoutUntil, reason: json.reason });
-      } catch { setAuthStatus('UNAUTHORIZED'); }
+      } catch {
+        setAuthStatus('UNAUTHORIZED');
+      }
     };
     checkAuth();
     const interval = setInterval(checkAuth, 10000);
@@ -948,6 +959,8 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
   const [logText, setLogText] = useState('');
   const [admins, setAdmins] = useState<AdminUser[]>([]);
   const [newAdmin, setNewAdmin] = useState<{ name: string; deviceId: string; role: Role }>({ name: '', deviceId: '', role: 'MOD' });
+  // FIX: state loading untuk tombol Tambah Admin
+  const [addingAdmin, setAddingAdmin] = useState(false);
   const [reports, setReports] = useState<BugReport[]>([]);
   const [aiStats, setAiStats] = useState<AiStats | null>(null);
   const [aiError, setAiError] = useState('');
@@ -975,22 +988,63 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
     return () => clearInterval(int);
   }, [open, fetchData, activeTab]);
 
+  // FIX: tampilkan error asli dari server (bukan hanya "gagal")
   const executeAction = async (id: string, action: string, reason?: string, durationMinutes?: number) => {
-    await fetch('/api/admin/requests', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action, reason, durationMinutes }) });
-    fetchData(); setActionModal(null); setReasonInput('');
+    try {
+      const res = await fetch('/api/admin/requests', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action, reason, durationMinutes }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j.error || `Gagal (HTTP ${res.status})`);
+        return;
+      }
+      fetchData(); setActionModal(null); setReasonInput('');
+    } catch (e: any) {
+      alert('Gagal: ' + (e?.message || 'unknown'));
+    }
   };
 
+  // FIX: beri feedback kalau bulk action gagal
   const executeBulk = async (action: string) => {
     if (selected.size === 0) return;
     if (action === 'BAN' && !confirm(`Yakin ingin mem-ban ${selected.size} user sekaligus?`)) return;
-    await fetch('/api/admin/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: Array.from(selected), action }) });
-    setSelected(new Set()); fetchData();
+    try {
+      const res = await fetch('/api/admin/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selected), action }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j.error || `Gagal (HTTP ${res.status})`);
+        return;
+      }
+      setSelected(new Set()); fetchData();
+    } catch (e: any) {
+      alert('Gagal: ' + (e?.message || 'unknown'));
+    }
   };
 
   const expirePending = async () => {
     if (!confirm(`Hapus semua request PENDING yang lebih lama dari ${expireHours} jam?`)) return;
-    await fetch('/api/admin/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'EXPIRE_PENDING', olderThanHours: Number(expireHours) }) });
-    fetchData();
+    try {
+      const res = await fetch('/api/admin/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'EXPIRE_PENDING', olderThanHours: Number(expireHours) }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j.error || `Gagal (HTTP ${res.status})`);
+        return;
+      }
+      fetchData();
+    } catch (e: any) {
+      alert('Gagal: ' + (e?.message || 'unknown'));
+    }
   };
 
   const saveFaction = async () => {
@@ -1020,16 +1074,55 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
     fetchData();
   };
 
+  // ═══════════ FIX UTAMA #2: addAdmin ═══════════
+  // - trim input
+  // - loading state supaya tidak dobel klik
+  // - baca & tampilkan error ASLI dari server (bukan "Gagal menambah admin." generik)
   const addAdmin = async () => {
-    if (!newAdmin.name.trim() || !newAdmin.deviceId.trim()) return;
-    const res = await fetch('/api/admin/admins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newAdmin) });
-    if (!res.ok) { alert('Gagal menambah admin.'); return; }
-    setNewAdmin({ name: '', deviceId: '', role: 'MOD' }); fetchData();
+    const name = newAdmin.name.trim();
+    const devId = newAdmin.deviceId.trim();
+    if (!name || !devId) { alert('Nama dan Device ID wajib diisi.'); return; }
+
+    setAddingAdmin(true);
+    try {
+      const res = await fetch('/api/admin/admins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, deviceId: devId, role: newAdmin.role }),
+      });
+      const raw = await res.text();
+      if (!res.ok) {
+        let msg = `Gagal menambah admin (HTTP ${res.status}).`;
+        try { const j = JSON.parse(raw); if (j?.error) msg = j.error; }
+        catch { if (raw) msg += ` — ${raw.slice(0, 140)}`; }
+        alert(msg);
+        return;
+      }
+      setNewAdmin({ name: '', deviceId: '', role: 'MOD' });
+      fetchData();
+    } catch (e: any) {
+      alert('Gagal menghubungi server: ' + (e?.message || 'unknown'));
+    } finally {
+      setAddingAdmin(false);
+    }
   };
 
+  // FIX: removeAdmin juga tampilkan error asli
   const removeAdmin = async (id: string) => {
     if (!confirm('Cabut akses admin ini?')) return;
-    await fetch(`/api/admin/admins?id=${id}`, { method: 'DELETE' }); fetchData();
+    try {
+      const res = await fetch(`/api/admin/admins?id=${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const raw = await res.text().catch(() => '');
+        let msg = `Gagal mencabut admin (HTTP ${res.status}).`;
+        try { const j = JSON.parse(raw); if (j?.error) msg = j.error; } catch {}
+        alert(msg);
+        return;
+      }
+      fetchData();
+    } catch (e: any) {
+      alert('Error: ' + (e?.message || 'unknown'));
+    }
   };
 
   const resolveReport = async (id: string) => {
@@ -1423,7 +1516,12 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
                     <option value="MOD">Moderator</option><option value="SUPER">Super Admin</option>
                   </select>
                 </div>
-                <div className="mt-4 flex justify-end"><button onClick={addAdmin} className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover">Tambah</button></div>
+                <div className="mt-4 flex justify-end">
+                  {/* FIX: tombol punya loading state supaya tidak dobel kirim */}
+                  <button onClick={addAdmin} disabled={addingAdmin} className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed">
+                    {addingAdmin ? 'Menambah…' : 'Tambah'}
+                  </button>
+                </div>
                 <p className="mt-2 text-[11px] text-subtle">Moderator hanya bisa mengelola user (ACC / timeout / ban). Faction, log, dan admin hanya untuk Super Admin.</p>
               </div>
               <div className="rounded-xl border border-line bg-card overflow-hidden">
