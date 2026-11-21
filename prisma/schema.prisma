@@ -95,6 +95,8 @@ model AiUsageDaily {
   @@index([day])
 }
 
+// Catatan: model AiFactionCache (versi sebelumnya) sudah tidak dipakai. Jika sudah ter-migrate, tabelnya boleh dibiarkan atau dihapus.
+
 // Cache bersama hasil klasifikasi faction (nama player -> faction), berlaku lintas user.
 model AiFactionCache {
   name      String   @id                       // nama player, lowercase + trim
