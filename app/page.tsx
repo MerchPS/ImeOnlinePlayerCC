@@ -456,21 +456,21 @@ export default function App() {
       <div className={`transition-all duration-300 ease-out ${isBlurred ? 'blur-[30px] scale-[0.95] opacity-10 pointer-events-none' : ''}`}>
         <main className="min-h-screen bg-app px-4 pb-16 pt-6 text-main sm:px-6">
           <div className="mx-auto max-w-5xl">
-            <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div className="flex items-center gap-3">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/ime-roleplay.gif" alt="IME Roleplay" className="h-14 w-20 shrink-0 rounded-lg border border-line object-cover" />
+            <header className="mb-6 flex flex-col gap-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/ime-roleplay.gif" alt="IME Roleplay" className="h-28 w-full rounded-2xl border border-line object-cover sm:h-40" />
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-subtle">IME Roleplay</div>
                   <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{viewMode === 'CC' ? 'Crimson Creed Monitor' : 'Semua Faction Monitor'}</h1>
                   <p className="mt-1 text-sm text-muted">{viewMode === 'CC' ? 'Pantau anggota Crimson Creed dan relasi aktif.' : 'Pantau semua faction dari satu halaman.'}</p>
                 </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button onClick={() => { window.location.href = viewMode === 'CC' ? '/factions' : '/'; }} className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-400">{viewMode === 'CC' ? 'Semua Faction' : 'Crimson Creed'}</button>
-                {authStatus === 'ADMIN' && <button onClick={() => setRelasiOpen(true)} className="rounded-full border border-red-500/30 bg-card px-3 py-2 text-xs font-semibold text-red-400">Relasi <span className="ml-1 opacity-70">{relasi.length}</span></button>}
-                {authStatus === 'ADMIN' && <button onClick={() => setAdminOpen(true)} className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-500">Admin</button>}
-                <button onClick={() => setSettingsOpen(true)} className="rounded-full border border-line bg-card px-3 py-2 text-xs font-semibold text-muted">Pengaturan</button>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => { window.location.href = viewMode === 'CC' ? '/factions' : '/'; }} className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-400">{viewMode === 'CC' ? 'Semua Faction' : 'Crimson Creed'}</button>
+                  {authStatus === 'ADMIN' && <button onClick={() => setRelasiOpen(true)} className="rounded-full border border-red-500/30 bg-card px-3 py-2 text-xs font-semibold text-red-400">Relasi <span className="ml-1 opacity-70">{relasi.length}</span></button>}
+                  {authStatus === 'ADMIN' && <button onClick={() => setAdminOpen(true)} className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-500">Admin</button>}
+                  <button onClick={() => setSettingsOpen(true)} className="rounded-full border border-line bg-card px-3 py-2 text-xs font-semibold text-muted">Pengaturan</button>
+                </div>
               </div>
             </header>
             <section className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
