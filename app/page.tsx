@@ -219,6 +219,17 @@ export default function App() {
 
   const [showChangelog, setShowChangelog] = useState(false);
   const [bugReportOpen, setBugReportOpen] = useState(false);
+  const [data, setData] = useState<ApiData | null>(null);
+  const [factions, setFactions] = useState<FactionDef[]>(FALLBACK_FACTIONS);
+  const [relasi, setRelasi] = useState<Relasi[]>([]);
+  const [relasiOpen, setRelasiOpen] = useState(false);
+  const [relasiEditorOpen, setRelasiEditorOpen] = useState(false);
+  const [relasiForm, setRelasiForm] = useState<RelasiForm>({ citizenId: '', firstName: '', lastName: '', dob: '', sex: '', nationality: '', relation: '', notes: '', robberyMissionCompleted: false, responsiblePerson: '', joinedAt: '', bloodOathDate: '', idCardUrl: '', bloodOathVideoUrl: '', active: true });
+  const [relasiSaving, setRelasiSaving] = useState(false);
+  const [relasiError, setRelasiError] = useState('');
+  const [search, setSearch] = useState('');
+  const [dashboardError, setDashboardError] = useState('');
+  const [dashboardLoading, setDashboardLoading] = useState(true);
 
   // State khusus moderator
   const [viewMode, setViewMode] = useState<'ALL' | 'CC'>('CC');
@@ -299,6 +310,121 @@ export default function App() {
     };
   }, []);
 
+  const loadDashboard = useCallback(async () => {
+    setDashboardLoading(true);
+    setDashboardError('');
+    try {
+      const [playersRes, factionsRes] = await Promise.all([
+        fetch('/api/players', { cache: 'no-store' }),
+        fetch('/api/factions', { cache: 'no-store' }),
+      ]);
+      const playerJson = await playersRes.json().catch(() => null);
+      if (!playersRes.ok || !playerJson?.ok) throw new Error(playerJson?.error || 'Gagal memuat data pemain');
+      setData(playerJson);
+      if (factionsRes.ok) {
+        const factionJson = await factionsRes.json();
+        if (Array.isArray(factionJson)) setFactions(mergeFactions(factionJson));
+      }
+    } catch (e: any) {
+      setDashboardError(e?.message || 'Gagal memuat dashboard');
+    } finally {
+      setDashboardLoading(false);
+    }
+  }, []);
+
+  const loadRelasi = useCallback(async () => {
+    if (authStatus !== 'ADMIN') return;
+    try {
+      const res = await fetch('/api/relasi', { headers: staffHeaders(deviceId, false), cache: 'no-store' });
+      if (res.ok) setRelasi(await res.json());
+    } catch { /* ignore */ }
+  }, [authStatus, deviceId]);
+
+  useEffect(() => {
+    if (authStatus === 'LOADING' || ['UNAUTHORIZED', 'PENDING', 'BANNED', 'TIMEOUT'].includes(authStatus)) return;
+    loadDashboard();
+    const id = setInterval(loadDashboard, settings.refreshMs);
+    return () => clearInterval(id);
+  }, [authStatus, settings.refreshMs, loadDashboard]);
+
+  useEffect(() => {
+    if (authStatus !== 'ADMIN') return;
+    loadRelasi();
+    const id = setInterval(loadRelasi, 30000);
+    return () => clearInterval(id);
+  }, [authStatus, loadRelasi]);
+
+  const matchers = useMemo(() => buildMatchers(factions), [factions]);
+  const factionMap = useMemo(() => {
+    const map = new Map<string, FactionDef>();
+    factions.forEach(f => map.set(f.id, f));
+    return map;
+  }, [factions]);
+  const ccIds = useMemo(() => new Set(factions.filter(f => f.short.split(',').map(clean).includes('CC')).map(f => f.id)), [factions]);
+  const enriched = useMemo<EnrichedPlayer[]>(() => (data?.players ?? []).map(p => {
+    const faction = detectFaction(p.name, matchers);
+    return { ...p, faction, side: faction === 'WARGA' ? 'CIVIL' : resolveSide(factionMap.get(faction)) };
+  }), [data, matchers, factionMap]);
+  const shownPlayers = useMemo(() => {
+    let rows = viewMode === 'CC' ? enriched.filter(p => ccIds.has(p.faction)) : enriched;
+    const q = search.trim().toLowerCase();
+    if (q) rows = rows.filter(p => p.name.toLowerCase().includes(q) || String(p.id).includes(q));
+    return rows;
+  }, [enriched, ccIds, viewMode, search]);
+
+  const openNewRelasi = () => {
+    setRelasiError('');
+    setRelasiForm({ citizenId: '', firstName: '', lastName: '', dob: '', sex: '', nationality: '', relation: '', notes: '', robberyMissionCompleted: false, responsiblePerson: '', joinedAt: '', bloodOathDate: '', idCardUrl: '', bloodOathVideoUrl: '', active: true });
+    setRelasiEditorOpen(true);
+  };
+
+  const saveRelasi = async () => {
+    setRelasiError('');
+    if (!relasiForm.firstName.trim() || !relasiForm.lastName.trim() || !relasiForm.citizenId.trim()) {
+      setRelasiError('Nama depan, nama belakang, dan Citizen ID wajib diisi.'); return;
+    }
+    if (!relasiForm.id && (!relasiForm.responsiblePerson.trim() || !relasiForm.joinedAt)) {
+      setRelasiError('Penanggung jawab dan tanggal masuk wajib diisi.'); return;
+    }
+    if (relasiForm.bloodOathDate && !relasiForm.robberyMissionCompleted) {
+      setRelasiError('Misi rampok harus selesai sebelum tanggal sumpah darah.'); return;
+    }
+    setRelasiSaving(true);
+    try {
+      const res = await fetch('/api/relasi', {
+        method: relasiForm.id ? 'PUT' : 'POST',
+        headers: staffHeaders(deviceId),
+        body: JSON.stringify(relasiForm),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Gagal menyimpan relasi');
+      await loadRelasi();
+      setRelasiEditorOpen(false);
+    } catch (e: any) { setRelasiError(e?.message || 'Gagal menyimpan relasi'); }
+    finally { setRelasiSaving(false); }
+  };
+
+  const [saving, setSaving] = useState(false);
+  const [mediaBusy, setMediaBusy] = useState(false);
+
+  const uploadMedia = async (file: File, kind: 'id-card' | 'oath-video') => {
+    setRelasiError('');
+    if (file.size > 10 * 1024 * 1024) { setRelasiError('Ukuran file maksimal 10 MB.'); return; }
+    setMediaBusy(true);
+    try {
+      const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '-').slice(-80) || 'upload';
+      const blob = await upload(`relasi-media/${kind}/${crypto.randomUUID()}-${safeName}`, file, {
+        access: 'private',
+        handleUploadUrl: '/api/relasi/upload',
+        clientPayload: JSON.stringify({ deviceId, kind }),
+      });
+      setRelasiForm(f => ({ ...f, [kind === 'id-card' ? 'idCardUrl' : 'bloodOathVideoUrl']: blob.pathname }));
+    } catch (e: any) { setRelasiError(e?.message || 'Upload media gagal'); }
+    finally { setMediaBusy(false); }
+  };
+
+  const [editorOpen, setEditorOpen] = useState(false);
+
   if (framed) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-black p-6 text-center text-white">
@@ -342,12 +468,36 @@ export default function App() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => { window.location.href = viewMode === 'CC' ? '/factions' : '/'; }} className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-400">{viewMode === 'CC' ? 'Semua Faction' : 'Crimson Creed'}</button>
+                {authStatus === 'ADMIN' && <button onClick={() => setRelasiOpen(true)} className="rounded-full border border-red-500/30 bg-card px-3 py-2 text-xs font-semibold text-red-400">Relasi <span className="ml-1 opacity-70">{relasi.length}</span></button>}
                 {authStatus === 'ADMIN' && <button onClick={() => setAdminOpen(true)} className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-500">Admin</button>}
                 <button onClick={() => setSettingsOpen(true)} className="rounded-full border border-line bg-card px-3 py-2 text-xs font-semibold text-muted">Pengaturan</button>
               </div>
             </header>
-            <section className="rounded-2xl border border-line bg-card p-5 text-center text-sm text-muted">
-              Pilih <b>Semua Faction</b> untuk membuka halaman faction, atau buka <b>Crimson Creed</b> sebagai dashboard utama.
+            <section className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-2xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Online</div><div className="mt-1 text-2xl font-bold text-emerald-500">{data ? fmt(data.online) : '—'}</div></div>
+              <div className="rounded-2xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Max Slot</div><div className="mt-1 text-2xl font-bold">{data ? fmt(data.max) : '—'}</div></div>
+              <div className="rounded-2xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Gate</div><div className="mt-1 truncate text-sm font-semibold">{data?.gate ?? '—'}</div></div>
+              <div className="rounded-2xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Faction</div><div className="mt-1 text-2xl font-bold text-accent">{factions.length}</div></div>
+            </section>
+            {dashboardError && <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">{dashboardError}</div>}
+            <section className="mb-4 flex gap-3">
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari nama atau kantong…" className="min-w-0 flex-1 rounded-xl border border-line bg-card px-4 py-2.5 text-sm outline-none focus:border-accent" />
+              <button onClick={loadDashboard} disabled={dashboardLoading} className="rounded-xl border border-line bg-card px-4 py-2.5 text-sm disabled:opacity-40">{dashboardLoading ? 'Memuat…' : 'Refresh'}</button>
+            </section>
+            <section className="overflow-hidden rounded-2xl border border-line bg-card">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-line bg-hover text-[10px] uppercase tracking-wider text-subtle"><tr><th className="px-4 py-3">Kantong</th><th className="px-4 py-3">Nama Player</th><th className="px-4 py-3">Faction</th><th className="px-4 py-3 text-right">Ping</th></tr></thead>
+                  <tbody>
+                    {dashboardLoading ? <tr><td colSpan={4} className="px-4 py-16 text-center text-subtle">Memuat data player…</td></tr>
+                    : shownPlayers.length === 0 ? <tr><td colSpan={4} className="px-4 py-16 text-center text-subtle">Tidak ada player ditemukan.</td></tr>
+                    : shownPlayers.map(p => {
+                      const fac = factionMap.get(p.faction) ?? WARGA;
+                      return <tr key={`${p.id}-${p.name}`} className="border-t border-line transition hover:bg-hover/60"><td className="px-4 py-3 font-mono text-xs text-main">#{p.id}</td><td className="px-4 py-3 font-medium text-main">{p.name}</td><td className="px-4 py-3"><FactionTag fac={fac} variant="pill" /></td><td className="px-4 py-3 text-right"><span className={`rounded border px-2 py-1 font-mono text-xs ${pingClass(p.ping)}`}>{p.ping}</span></td></tr>;
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </section>
           </div>
         </main>
@@ -361,6 +511,19 @@ export default function App() {
       >
         <BugIcon className="h-6 w-6" />
       </button>
+
+      {authStatus === 'ADMIN' && <CompactRelasiPanel open={relasiOpen} onClose={() => setRelasiOpen(false)} deviceId={deviceId} items={relasi} onReload={loadRelasi} />}
+      {authStatus === 'ADMIN' && <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} role={role} deviceId={deviceId} />}
+
+      {settingsOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-line bg-card p-5"><h2 className="text-lg font-bold">Pengaturan</h2><div className="mt-4 space-y-3"><label className="block text-xs text-muted">Tema<select value={settings.theme} onChange={e => setSettings(s => ({ ...s, theme: e.target.value as Theme }))} className="mt-1 w-full rounded-xl border border-line bg-app px-3 py-2.5 text-sm text-main"><option value="dark">Dark</option><option value="light">Light</option><option value="glass">Glass</option><option value="cyberpunk">Cyberpunk</option><option value="nord">Nord</option></select></label><label className="block text-xs text-muted">Auto refresh<select value={settings.refreshMs} onChange={e => setSettings(s => ({ ...s, refreshMs: Number(e.target.value) }))} className="mt-1 w-full rounded-xl border border-line bg-app px-3 py-2.5 text-sm text-main"><option value={30000}>30 detik</option><option value={60000}>60 detik</option><option value={120000}>2 menit</option></select></label><div className="rounded-xl border border-line p-3"><div className="text-[10px] text-subtle">Device ID</div><div className="mt-1 break-all font-mono text-xs">{deviceId}</div></div></div><div className="mt-5 flex gap-2"><button onClick={() => setSettingsOpen(false)} className="flex-1 rounded-xl bg-hover py-2.5 text-sm">Batal</button><button onClick={() => { handleSaveSettings(settings); setSettingsOpen(false); }} className="flex-1 rounded-xl bg-accent py-2.5 text-sm font-semibold text-accent-text">Simpan</button></div></div>
+        </div>
+      )}
+
+      {bugReportOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4"><div className="w-full max-w-md rounded-2xl border border-line bg-card p-5"><h2 className="text-lg font-bold">Laporkan Bug</h2><textarea id="bug-message" rows={5} placeholder="Jelaskan masalah yang ditemukan…" className="mt-4 w-full resize-none rounded-xl border border-line bg-app p-3 text-sm" /><div className="mt-4 flex gap-2"><button onClick={() => setBugReportOpen(false)} className="flex-1 rounded-xl bg-hover py-2.5 text-sm">Batal</button><button onClick={async () => { const el = document.getElementById('bug-message') as HTMLTextAreaElement | null; const message = el?.value.trim(); if (!message) return; await fetch('/api/reports', { method: 'POST', headers: staffHeaders(deviceId), body: JSON.stringify({ deviceId, message }) }).catch(() => {}); setBugReportOpen(false); }} className="flex-1 rounded-xl bg-red-500 py-2.5 text-sm font-semibold text-white">Kirim</button></div></div></div>
+      )}
     </div>
   );
 }
@@ -651,7 +814,7 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={IME_GIF} alt="IME Roleplay" onError={() => setGifOk(false)} draggable={false} className="max-h-32 w-auto max-w-full rounded-[20px] object-contain sm:max-h-44" />
             </div>
-          )}
+          ) }
           <div className="ms-head">
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/70 backdrop-blur-xl">
               <span className="ms-live" /> {role === 'SUPER' ? 'Akses Super Admin' : 'Akses Moderator'}
@@ -703,6 +866,115 @@ function ModSelectionScreen({ role, onSelect }: { role: Role; onSelect: (mode: M
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ══════════════ Relasi Editor Component ══════════════ */
+function RelasiEditor({ open, form, setForm, saving, mediaBusy, error, onClose, onSave, onUpload }: {
+  open: boolean;
+  form: RelasiForm;
+  setForm: React.Dispatch<React.SetStateAction<RelasiForm>>;
+  saving: boolean;
+  mediaBusy: boolean;
+  error: string;
+  onClose: () => void;
+  onSave: () => void;
+  onUpload: (file: File, kind: 'id-card' | 'oath-video') => void;
+}) {
+  if (!open) return null;
+  const setField = <K extends keyof RelasiForm>(key: K, value: RelasiForm[K]) => setForm(f => ({ ...f, [key]: value }));
+  return (
+    <div className="fixed inset-0 z-[110] flex items-end justify-center bg-black/60 sm:items-center sm:p-4">
+      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-line bg-card sm:rounded-2xl">
+        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-card px-5 py-4">
+          <h2 className="font-bold">{form.id ? 'Edit Relasi' : 'Tambah Relasi'}</h2>
+          <button onClick={onClose} className="rounded-lg bg-hover px-3 py-2 text-sm">Tutup</button>
+        </header>
+        <div className="space-y-3 p-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <input value={form.firstName} onChange={e => setField('firstName', e.target.value)} placeholder="Nama depan *" className="rounded-xl border border-line bg-app px-3 py-2.5 text-sm" />
+            <input value={form.lastName} onChange={e => setField('lastName', e.target.value)} placeholder="Nama belakang *" className="rounded-xl border border-line bg-app px-3 py-2.5 text-sm" />
+            <input value={form.citizenId} onChange={e => setField('citizenId', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} maxLength={16} placeholder="Citizen ID *" className="rounded-xl border border-line bg-app px-3 py-2.5 font-mono text-sm sm:col-span-2" />
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <input value={form.responsiblePerson} onChange={e => setField('responsiblePerson', e.target.value)} placeholder="Penanggung jawab *" className="rounded-xl border border-line bg-app px-3 py-2.5 text-sm" />
+            <label className="text-[11px] text-muted">Tanggal masuk CC *<input type="date" value={form.joinedAt} onChange={e => setField('joinedAt', e.target.value)} className="mt-1 w-full rounded-xl border border-line bg-app px-3 py-2.5 text-sm text-main" /></label>
+            <label className="flex items-center justify-between rounded-xl border border-line px-3 py-2.5 text-sm"><span>Misi rampok selesai</span><input type="checkbox" checked={form.robberyMissionCompleted} onChange={e => { setField('robberyMissionCompleted', e.target.checked); if (!e.target.checked) setField('bloodOathDate', ''); }} /></label>
+            <label className="text-[11px] text-muted">Tanggal sumpah darah<input type="date" disabled={!form.robberyMissionCompleted} value={form.bloodOathDate} onChange={e => setField('bloodOathDate', e.target.value)} className="mt-1 w-full rounded-xl border border-line bg-app px-3 py-2.5 text-sm text-main disabled:opacity-40" /></label>
+          </div>
+          <input value={form.relation} onChange={e => setField('relation', e.target.value)} placeholder="Hubungan / keterangan" className="w-full rounded-xl border border-line bg-app px-3 py-2.5 text-sm" />
+          <textarea value={form.notes} onChange={e => setField('notes', e.target.value)} rows={3} placeholder="Catatan" className="w-full resize-none rounded-xl border border-line bg-app px-3 py-2.5 text-sm" />
+          <section className="grid grid-cols-1 gap-3 rounded-xl border border-line p-3 sm:grid-cols-2">
+            <label className="block rounded-xl bg-hover p-3"><span className="block text-xs font-semibold">Foto KTP <span className="text-subtle">(opsional)</span></span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={mediaBusy} onChange={e => { const file = e.target.files?.[0]; if (file) onUpload(file, 'id-card'); e.target.value = ''; }} className="mt-2 block w-full text-xs" /><span className="mt-1 block text-[10px] text-muted">{form.idCardUrl ? 'Foto tersimpan privat' : 'Belum ada foto'}</span></label>
+            <label className="block rounded-xl bg-hover p-3"><span className="block text-xs font-semibold">Video sumpah darah <span className="text-subtle">(maks. 10 MB)</span></span><input type="file" accept="video/mp4,video/webm,video/quicktime" disabled={mediaBusy || !form.robberyMissionCompleted} onChange={e => { const file = e.target.files?.[0]; if (file) onUpload(file, 'oath-video'); e.target.value = ''; }} className="mt-2 block w-full text-xs disabled:opacity-50" /><span className="mt-1 block text-[10px] text-muted">{form.bloodOathVideoUrl ? 'Video tersimpan privat' : 'Belum ada video'}</span></label>
+          </section>
+          {error && <div className="rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-500">{error}</div>}
+          <div className="flex gap-2"><button onClick={onClose} className="flex-1 rounded-xl bg-hover py-3 text-sm">Batal</button><button onClick={onSave} disabled={saving || mediaBusy} className="flex-1 rounded-xl bg-accent py-3 text-sm font-semibold text-accent-text disabled:opacity-50">{saving ? 'Menyimpan…' : mediaBusy ? 'Mengunggah…' : form.id ? 'Simpan Perubahan' : 'Tambah Relasi'}</button></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════ Compact Relasi Panel Component ══════════════ */
+function CompactRelasiPanel({ open, onClose, deviceId, items, onReload }: { open: boolean; onClose: () => void; deviceId: string; items: Relasi[]; onReload: () => void }) {
+  const empty: RelasiForm = { citizenId: '', firstName: '', lastName: '', dob: '', sex: '', nationality: '', relation: '', notes: '', robberyMissionCompleted: false, responsiblePerson: '', joinedAt: '', bloodOathDate: '', idCardUrl: '', bloodOathVideoUrl: '', active: true };
+  const [editor, setEditor] = useState(false);
+  const [form, setForm] = useState<RelasiForm>(empty);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [mediaBusy, setMediaBusy] = useState(false);
+
+  const uploadMedia = async (file: File, kind: 'id-card' | 'oath-video') => {
+    setError('');
+    if (file.size > 10 * 1024 * 1024) { setError('Ukuran file maksimal 10 MB.'); return; }
+    setMediaBusy(true);
+    try {
+      const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '-').slice(-80) || 'upload';
+      const blob = await upload(`relasi-media/${kind}/${crypto.randomUUID()}-${safeName}`, file, {
+        access: 'private',
+        handleUploadUrl: '/api/relasi/upload',
+        clientPayload: JSON.stringify({ deviceId, kind }),
+      });
+      setForm(f => ({ ...f, [kind === 'id-card' ? 'idCardUrl' : 'bloodOathVideoUrl']: blob.pathname }));
+    } catch (e: any) { setError(e?.message || 'Upload media gagal'); }
+    finally { setMediaBusy(false); }
+  };
+
+  const setField = <K extends keyof RelasiForm>(key: K, value: RelasiForm[K]) => setForm(f => ({ ...f, [key]: value }));
+  const save = async () => {
+    setError('');
+    if (!form.firstName.trim() || !form.lastName.trim() || !form.citizenId.trim()) { setError('Nama depan, nama belakang, dan Citizen ID wajib diisi.'); return; }
+    if (!form.id && (!form.responsiblePerson.trim() || !form.joinedAt)) { setError('Penanggung jawab dan tanggal masuk wajib diisi.'); return; }
+    if (form.bloodOathDate && !form.robberyMissionCompleted) { setError('Misi rampok harus ditandai selesai sebelum sumpah darah.'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/relasi', { method: form.id ? 'PUT' : 'POST', headers: staffHeaders(deviceId), body: JSON.stringify(form) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Gagal menyimpan relasi');
+      setEditor(false); onReload();
+    } catch (e: any) { setError(e?.message || 'Gagal menyimpan relasi'); }
+    finally { setSaving(false); }
+  };
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[100] flex flex-col bg-app">
+      <header className="flex items-center justify-between border-b border-line bg-card px-4 py-4" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
+        <div><h1 className="text-lg font-bold">Relasi Crimson Creed</h1><p className="text-[11px] text-muted">{items.length} data tersimpan</p></div>
+        <div className="flex gap-2"><button onClick={() => { setForm(empty); setError(''); setEditor(true); }} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-text">+ Tambah Relasi</button><button onClick={onClose} className="rounded-lg bg-hover px-4 py-2 text-sm">Tutup</button></div>
+      </header>
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <div className="mx-auto max-w-5xl space-y-3">
+          {items.length === 0 ? <div className="rounded-2xl border border-dashed border-line py-16 text-center text-sm text-subtle">Belum ada relasi.</div> : items.map(r => (
+            <div key={r.id} className="rounded-2xl border border-line bg-card p-4">
+              <div className="flex items-start justify-between gap-3"><div><div className="font-semibold">{r.firstName} {r.lastName}</div><div className="mt-1 font-mono text-[11px] text-subtle">{r.citizenId}</div></div><button onClick={() => { setForm({ id: r.id, citizenId: r.citizenId, firstName: r.firstName, lastName: r.lastName, dob: r.dob ?? '', sex: r.sex ?? '', nationality: r.nationality ?? '', relation: r.relation ?? '', notes: r.notes ?? '', robberyMissionCompleted: r.robberyMissionCompleted, responsiblePerson: r.responsiblePerson ?? '', joinedAt: r.joinedAt ?? '', bloodOathDate: r.bloodOathDate ?? '', idCardUrl: r.idCardUrl ?? '', bloodOathVideoUrl: r.bloodOathVideoUrl ?? '', active: r.active }); setError(''); setEditor(true); }} className="rounded-lg border border-line px-3 py-1.5 text-xs text-accent">Edit</button></div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div><span className="text-subtle">Masuk:</span> {r.joinedAt || '—'}</div><div><span className="text-subtle">PJ:</span> {r.responsiblePerson || '—'}</div><div><span className="text-subtle">Misi rampok:</span> {r.robberyMissionCompleted ? 'Selesai' : 'Belum'}</div><div><span className="text-subtle">Sumpah:</span> {r.bloodOathDate || 'Belum'}</div></div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {editor && <RelasiEditor open={editor} form={form} setForm={setForm} saving={saving} mediaBusy={mediaBusy} error={error} onClose={() => setEditor(false)} onSave={save} onUpload={uploadMedia} />}
     </div>
   );
 }

@@ -13,7 +13,13 @@ export async function GET(req: Request) {
   if (staff) return NextResponse.json({ status: 'ADMIN', role: staff.role });
 
   // 3. Sisanya adalah logika untuk warga biasa (AccessRequest)
-  let access = await prisma.accessRequest.findUnique({ where: { deviceId } });
+  let access;
+  try {
+    access = await prisma.accessRequest.findUnique({ where: { deviceId } });
+  } catch (error) {
+    console.error('[auth/status] Database unavailable:', error);
+    return NextResponse.json({ status: 'UNAUTHORIZED', databaseError: true }, { status: 503 });
+  }
   
   if (!access) return NextResponse.json({ status: 'UNAUTHORIZED' });
 
