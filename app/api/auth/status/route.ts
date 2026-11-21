@@ -1,29 +1,16 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
+import { getStaffByDeviceId } from '@/src/lib/staff';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const deviceId = searchParams.get('deviceId');
   const ip = req.headers.get('x-forwarded-for') || 'Unknown IP';
 
-  const SUPER_ADMIN_ID = '3c85d624-ca85-49be-86c3-e9364a796ace';
-  
-  // 1. FIX: Kirim role 'SUPER' ke frontend!
-  if (deviceId === SUPER_ADMIN_ID) {
-    return NextResponse.json({ status: 'ADMIN', role: 'SUPER' });
-  }
-
   if (!deviceId) return NextResponse.json({ status: 'UNAUTHORIZED' });
 
-  // 2. FIX: Cek apakah dia Admin/Moderator dari tabel AdminUser
-  try {
-    const adminUser = await prisma.adminUser.findUnique({ where: { deviceId } });
-    if (adminUser) {
-      return NextResponse.json({ status: 'ADMIN', role: adminUser.role });
-    }
-  } catch (error) {
-    console.error("Error query AdminUser (pastikan tabel sudah ada di schema.prisma):", error);
-  }
+  const staff = await getStaffByDeviceId(deviceId);
+  if (staff) return NextResponse.json({ status: 'ADMIN', role: staff.role });
 
   // 3. Sisanya adalah logika untuk warga biasa (AccessRequest)
   let access = await prisma.accessRequest.findUnique({ where: { deviceId } });

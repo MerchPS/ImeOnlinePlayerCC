@@ -8,6 +8,19 @@ const SEX = new Set(['MALE', 'FEMALE']);
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const opt = (v: unknown, max: number) => str(v, max) || null;
 const fail = (error: string, status: number) => NextResponse.json({ error }, { status });
+const validDate = (value: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
+const safeMediaKey = (value: unknown) => {
+  const key = opt(value, 250);
+  if (!key) return { value: null, error: '' };
+  if (!key.startsWith('relasi-media/') || key.includes('..') || !/^[A-Za-z0-9._/-]+$/.test(key)) {
+    return { value: null, error: 'Referensi media tidak valid.' };
+  }
+  return { value: key, error: '' };
+};
 
 function parse(body: any): { error: string } | { data: Record<string, any> } {
   const firstName = str(body?.firstName, 60);
@@ -19,12 +32,28 @@ function parse(body: any): { error: string } | { data: Record<string, any> } {
   if (dob && !/^\d{4}-\d{2}-\d{2}$/.test(dob)) return { error: 'Format tanggal lahir harus YYYY-MM-DD.' };
   const sex = str(body?.sex, 10).toUpperCase();
   if (sex && !SEX.has(sex)) return { error: 'Jenis kelamin harus MALE atau FEMALE.' };
+  const joinedAt = str(body?.joinedAt, 10);
+  const bloodOathDate = str(body?.bloodOathDate, 10);
+  const responsiblePerson = opt(body?.responsiblePerson, 100);
+  if (joinedAt && !validDate(joinedAt)) return { error: 'Tanggal masuk harus tanggal yang valid.' };
+  if (bloodOathDate && !validDate(bloodOathDate)) return { error: 'Tanggal sumpah darah harus tanggal yang valid.' };
+  if (!body?.id && (!responsiblePerson || !joinedAt)) return { error: 'Penanggung jawab dan tanggal masuk wajib diisi.' };
+  if (bloodOathDate && body?.robberyMissionCompleted !== true) return { error: 'Misi rampok harus ditandai selesai sebelum tanggal sumpah darah diisi.' };
+  const idCard = safeMediaKey(body?.idCardUrl);
+  const oathVideo = safeMediaKey(body?.bloodOathVideoUrl);
+  if (idCard.error || oathVideo.error) return { error: idCard.error || oathVideo.error };
   return {
     data: {
       firstName, lastName, citizenId,
       dob: dob || null, sex: sex || null,
-      nationality: opt(body?.nationality, 40), rank: opt(body?.rank, 60),
+      nationality: opt(body?.nationality, 40),
       relation: opt(body?.relation, 80), notes: opt(body?.notes, 500),
+      robberyMissionCompleted: body?.robberyMissionCompleted === true,
+      responsiblePerson,
+      joinedAt: joinedAt || null,
+      bloodOathDate: bloodOathDate || null,
+      idCardUrl: idCard.value,
+      bloodOathVideoUrl: oathVideo.value,
       active: body?.active !== false,
     },
   };

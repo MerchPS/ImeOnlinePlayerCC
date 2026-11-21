@@ -63,6 +63,12 @@ model Relasi {
   rank        String?                     // jabatan di CC, mis. Caporegime
   relation    String?                     // keterangan hubungan
   notes       String?
+  robberyMissionCompleted Boolean @default(false)
+  responsiblePerson String?
+  joinedAt    String?
+  bloodOathDate String?
+  idCardUrl   String?
+  bloodOathVideoUrl String?
   active      Boolean  @default(true)
   createdBy   String
   createdAt   DateTime @default(now())

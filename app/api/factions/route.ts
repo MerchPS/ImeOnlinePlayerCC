@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
+import { getStaff } from '@/src/lib/staff';
+
+async function superStaff(req: Request) {
+  const staff = await getStaff(req);
+  return staff && staff.role.toUpperCase().includes('SUPER') ? staff : null;
+}
 
 const DEFAULT_FACTIONS = [
   // ==========================================
@@ -64,6 +70,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  if (!(await superStaff(req))) return NextResponse.json({ error: 'Hanya Super Admin.' }, { status: 403 });
   const body = await req.json();
   const newFaction = await prisma.faction.create({
     data: {
@@ -80,6 +87,7 @@ export async function POST(req: Request) {
 }
 
 export async function PUT(req: Request) {
+  if (!(await superStaff(req))) return NextResponse.json({ error: 'Hanya Super Admin.' }, { status: 403 });
   const body = await req.json();
   const updated = await prisma.faction.update({
     where: { id: body.id },
@@ -97,6 +105,7 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  if (!(await superStaff(req))) return NextResponse.json({ error: 'Hanya Super Admin.' }, { status: 403 });
   const { searchParams } = new URL(req.url);
   const id = searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });

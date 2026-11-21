@@ -22,6 +22,11 @@ export type StaffInfo = { id: string; name: string; role: string; deviceId: stri
  */
 export async function getStaff(req: Request): Promise<StaffInfo | null> {
   const deviceId = req.headers.get('x-device-id')?.trim();
+  return getStaffByDeviceId(deviceId || '');
+}
+
+export async function getStaffByDeviceId(deviceId: string): Promise<StaffInfo | null> {
+  deviceId = deviceId.trim();
   if (!deviceId || deviceId.length > 100) return null;
 
   const owners = (process.env.SUPER_ADMIN_DEVICE_IDS || '').split(',').map(s => s.trim()).filter(Boolean);

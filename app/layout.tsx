@@ -5,8 +5,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "IME Roleplay • Player Monitor",
-  description: "Pantau player online IME Roleplay secara realtime.",
+  title: "Crimson Creed • IME Roleplay",
+  description: "Monitor anggota Crimson Creed dan kelola data relasi secara privat.",
 };
 
 export default function RootLayout({

@@ -4,10 +4,10 @@
 
 @layer base {
   :root, [data-theme="dark"] {
-    --bg-app: #0c0a08; --bg-card: #12100e; --bg-nav: rgba(21, 18, 15, 0.85); --bg-hover: #1c1815;
-    --text-main: #ebe3d5; --text-muted: #8a8073; --text-subtle: #5a554c;
-    --border-line: #2a2520; --border-line-hover: #3a3630;
-    --accent: #d4a574; --accent-text: #0c0a08; --accent-hover: #e0b88a;
+    --bg-app: #0b0b0c; --bg-card: #141416; --bg-nav: rgba(20, 18, 19, 0.9); --bg-hover: #211a1b;
+    --text-main: #f2eeee; --text-muted: #a59da0; --text-subtle: #746b6e;
+    --border-line: #30282a; --border-line-hover: #49383b;
+    --accent: #d8434e; --accent-text: #ffffff; --accent-hover: #ed5963;
   }
   [data-theme="light"] {
     --bg-app: #f8fafc; --bg-card: #ffffff; --bg-nav: rgba(255, 255, 255, 0.85); --bg-hover: #f1f5f9;
