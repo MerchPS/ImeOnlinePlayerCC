@@ -1,6 +1,13 @@
 // Simpan sebagai: src/lib/staff.ts
 import { prisma } from '@/src/lib/prisma';
 
+/** Cari model admin di Prisma Client dengan beberapa kemungkinan nama (adminUser, admin, ...). null jika tidak ada. */
+export function adminModel(): any | null {
+  const p = prisma as any;
+  for (const k of ['adminUser', 'admin', 'adminUsers', 'staff', 'moderator']) if (p?.[k]?.findFirst) return p[k];
+  return null;
+}
+
 export type StaffInfo = { id: string; name: string; role: string; deviceId: string };
 
 /**
@@ -21,7 +28,9 @@ export async function getStaff(req: Request): Promise<StaffInfo | null> {
   if (owners.includes(deviceId)) return { id: 'env-owner', name: 'Super Admin', role: 'SUPER', deviceId };
 
   try {
-    const admin = await (prisma as any).adminUser.findFirst({ where: { deviceId } });
+    const model = adminModel();
+    if (!model) return null;
+    const admin = await model.findFirst({ where: { deviceId } });
     return admin ? { id: String(admin.id), name: String(admin.name), role: String(admin.role), deviceId } : null;
   } catch {
     return null;
