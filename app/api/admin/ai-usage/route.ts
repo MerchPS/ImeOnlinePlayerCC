@@ -1,7 +1,7 @@
 // Simpan sebagai: .../api/admin/ai-usage/route.ts   (khusus SUPER ADMIN)
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
-import { getStaff, audit } from '@/src/lib/staff';
+import { getStaff } from '@/src/lib/staff';
 import { dayKey, budgetConfig } from '@/src/lib/aiUsage';
 
 const fail = (error: string, status: number) => NextResponse.json({ error }, { status });
@@ -39,7 +39,6 @@ export async function GET(req: Request) {
 
   const dayList = Array.from(days, ([day, v]) => ({ day, ...v }));
   const sum = (xs: { chat: number; faction: number }[]) => xs.reduce((a, d) => a + d.chat + d.faction, 0);
-  const cacheRows = await prisma.aiFactionCache.count().catch(() => 0);
 
   return NextResponse.json({
     config: budgetConfig(),
@@ -48,16 +47,6 @@ export async function GET(req: Request) {
     last7: sum(dayList.slice(-7)),
     last14: sum(dayList),
     topDevices: Array.from(devices, ([deviceId, v]) => ({ deviceId, ...v })).sort((a, b) => b.tokens - a.tokens).slice(0, 8),
-    cacheRows,
+    cacheRows: 0,
   });
-}
-
-export async function POST(req: Request) {
-  const staff = await superOnly(req);
-  if (!staff) return fail('Hanya Super Admin.', 403);
-  const body = await req.json().catch(() => null);
-  if (body?.action !== 'CLEAR_CACHE') return fail('Aksi tidak dikenal.', 400);
-  const r = await prisma.aiFactionCache.deleteMany();
-  await audit(staff, 'AI_CACHE_CLEAR', '-', `${r.count} nama dihapus`);
-  return NextResponse.json({ deleted: r.count });
 }
