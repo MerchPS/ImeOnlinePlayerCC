@@ -18,7 +18,6 @@ type Theme = 'dark' | 'light' | 'glass' | 'cyberpunk' | 'nord' | 'ios' | 'iosdar
 type Settings = { theme: Theme; refreshMs: number; compact: boolean; tagStyle: 'pill' | 'widget'; pageSize: number; notifyJoin: boolean; notifyRestart: boolean };
 type EnrichedPlayer = Player & { faction: string; side: Side | 'CIVIL' };
 type SessionRec = { start: number | null; last: number; total: number; count: number };
-type AiFactionCache = Record<string, { faction: string; t: number }>;
 type AiStats = {
   config: { total: number; faction: number; factionEnabled: boolean };
   today: { tokens: number; input: number; output: number; calls: number; cacheHits: number; errors: number; estimatedCalls: number; chat: number; faction: number };
@@ -174,37 +173,6 @@ function detectFaction(name: string, matchers: Matcher[]): string {
   return 'WARGA';
 }
 
-/* ───── HEMAT TOKEN: gerbang sebelum nama dikirim ke AI ───── */
-const AI_MIN_INTERVAL = 3 * 60_000;      // maksimal 1 panggilan AI / 3 menit / perangkat
-const AI_FAIL_COOLDOWN = 5 * 60_000;     // setelah error, tunggu 5 menit
-const AI_CLIENT_TTL = 24 * 3600_000;     // cache di perangkat 24 jam (server punya cache bersama 7 hari)
-const AI_BATCH = 30;
-
-function lev1(a: string, b: string): boolean {  // jarak edit <= 1
-  if (a === b) return true;
-  if (Math.abs(a.length - b.length) > 1) return false;
-  let i = 0;
-  while (i < a.length && i < b.length && a[i] === b[i]) i++;
-  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
-  if (a.length > b.length) return a.slice(i + 1) === b.slice(i);
-  return b.slice(i + 1) === a.slice(i);
-}
-
-/* Nama layak ditanyakan ke AI hanya jika MENYERUPAI alias faction (mengandung, diawali, atau salah ketik 1 huruf).
-   Nama warga biasa ("Budi Santoso") tidak pernah dikirim: tidak ada token terbuang untuk jawaban "WARGA". */
-function aiCandidate(name: string, matchers: Matcher[]): boolean {
-  const squash = clean(name);
-  if (squash.length < 2) return false;
-  const first = nameTokens(name.includes(' - ') ? name.split(' - ')[0] : name)[0] ?? '';
-  for (const m of matchers) {
-    const al = m.alias;
-    if (al.length >= 3 && squash.includes(al)) return true;
-    if (al.length === 2 && squash.startsWith(al)) return true;
-    if (al.length >= 4 && first.length >= al.length - 1 && lev1(first.slice(0, al.length), al)) return true;
-  }
-  return false;
-}
-
 /* Relasi dianggap online jika SEMUA kata nama depan + belakang ada di nama player */
 function findRelasiPlayer(r: { firstName: string; lastName: string }, players: EnrichedPlayer[]): EnrichedPlayer | null {
   const need = [...nameTokens(r.firstName), ...nameTokens(r.lastName)];
@@ -239,8 +207,7 @@ function renderMarkdown(text: string) {
 /* ══════════════ Main App Component ══════════════ */
 export default function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>('LOADING');
-  // FIX: default role jadi MOD, bukan SUPER (aman sebelum status auth termuat)
-  const [role, setRole] = useState<Role>('MOD');
+  const [role, setRole] = useState<Role>('SUPER');
   const [deviceId, setDeviceId] = useState<string>('');
   const [authMeta, setAuthMeta] = useState<{ timeoutUntil?: string; reason?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -293,21 +260,12 @@ export default function App() {
       try {
         const res = await fetch(`/api/auth/status?deviceId=${deviceId}`);
         const json = await res.json();
-
-        // FIX: validasi status agar nilai tak dikenal tidak lolos ke render
-        const validStatuses: AuthStatus[] = ['LOADING', 'UNAUTHORIZED', 'PENDING', 'APPROVED', 'ADMIN', 'BANNED', 'TIMEOUT'];
-        const status = String(json?.status ?? '').toUpperCase() as AuthStatus;
-        setAuthStatus(validStatuses.includes(status) ? status : 'UNAUTHORIZED');
-
-        // FIX: fallback ke MOD (bukan SUPER). Hanya role yang benar-benar berisi
-        // "SUPER" yang dianggap super admin. MOD / nilai kosong → tetap MOD.
-        const r = String(json.role ?? '').toUpperCase();
-        setRole(r.includes('SUPER') ? 'SUPER' : 'MOD');
-
+        setAuthStatus(json.status);
+        // Role kosong = pemilik lama (SUPER). Role terisi tapi tidak dikenal = MOD (hak akses terkecil), bukan SUPER.
+        const r = String(json.role ?? '').trim().toUpperCase();
+        setRole(r === '' || r.includes('SUPER') || r.includes('OWNER') ? 'SUPER' : 'MOD');
         setAuthMeta({ timeoutUntil: json.timeoutUntil, reason: json.reason });
-      } catch {
-        setAuthStatus('UNAUTHORIZED');
-      }
+      } catch { setAuthStatus('UNAUTHORIZED'); }
     };
     checkAuth();
     const interval = setInterval(checkAuth, 10000);
@@ -959,19 +917,23 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
   const [logText, setLogText] = useState('');
   const [admins, setAdmins] = useState<AdminUser[]>([]);
   const [newAdmin, setNewAdmin] = useState<{ name: string; deviceId: string; role: Role }>({ name: '', deviceId: '', role: 'MOD' });
-  // FIX: state loading untuk tombol Tambah Admin
-  const [addingAdmin, setAddingAdmin] = useState(false);
   const [reports, setReports] = useState<BugReport[]>([]);
   const [aiStats, setAiStats] = useState<AiStats | null>(null);
   const [aiError, setAiError] = useState('');
-  const [aiBusy, setAiBusy] = useState(false);
+  const [adminErr, setAdminErr] = useState('');
+  const [adminsError, setAdminsError] = useState('');
+  const [adminBusy, setAdminBusy] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
       if (activeTab === 'requests') { const res = await fetch('/api/admin/requests'); if (res.ok) setRequests(await res.json()); }
       else if (activeTab === 'audit') { const res = await fetch('/api/admin/audit'); if (res.ok) setLogs(await res.json()); }
       else if (activeTab === 'factions') { const res = await fetch('/api/factions'); if (res.ok) setFactions(await res.json()); }
-      else if (activeTab === 'admins') { const res = await fetch('/api/admin/admins'); if (res.ok) setAdmins(await res.json()); }
+      else if (activeTab === 'admins') {
+        const [a, r] = await Promise.all([fetch('/api/admin/admins', { headers: staffHeaders(deviceId, false), cache: 'no-store' }), fetch('/api/admin/requests')]);
+        if (a.ok) { setAdmins(await a.json()); setAdminsError(''); } else setAdminsError(await httpError(a));
+        if (r.ok) setRequests(await r.json());
+      }
       else if (activeTab === 'reports') { const res = await fetch('/api/reports'); if (res.ok) setReports(await res.json()); }
       else if (activeTab === 'ai') {
         const res = await fetch('/api/admin/ai-usage', { headers: staffHeaders(deviceId, false), cache: 'no-store' });
@@ -988,63 +950,22 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
     return () => clearInterval(int);
   }, [open, fetchData, activeTab]);
 
-  // FIX: tampilkan error asli dari server (bukan hanya "gagal")
   const executeAction = async (id: string, action: string, reason?: string, durationMinutes?: number) => {
-    try {
-      const res = await fetch('/api/admin/requests', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action, reason, durationMinutes }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        alert(j.error || `Gagal (HTTP ${res.status})`);
-        return;
-      }
-      fetchData(); setActionModal(null); setReasonInput('');
-    } catch (e: any) {
-      alert('Gagal: ' + (e?.message || 'unknown'));
-    }
+    await fetch('/api/admin/requests', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action, reason, durationMinutes }) });
+    fetchData(); setActionModal(null); setReasonInput('');
   };
 
-  // FIX: beri feedback kalau bulk action gagal
   const executeBulk = async (action: string) => {
     if (selected.size === 0) return;
     if (action === 'BAN' && !confirm(`Yakin ingin mem-ban ${selected.size} user sekaligus?`)) return;
-    try {
-      const res = await fetch('/api/admin/requests', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: Array.from(selected), action }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        alert(j.error || `Gagal (HTTP ${res.status})`);
-        return;
-      }
-      setSelected(new Set()); fetchData();
-    } catch (e: any) {
-      alert('Gagal: ' + (e?.message || 'unknown'));
-    }
+    await fetch('/api/admin/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: Array.from(selected), action }) });
+    setSelected(new Set()); fetchData();
   };
 
   const expirePending = async () => {
     if (!confirm(`Hapus semua request PENDING yang lebih lama dari ${expireHours} jam?`)) return;
-    try {
-      const res = await fetch('/api/admin/requests', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'EXPIRE_PENDING', olderThanHours: Number(expireHours) }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        alert(j.error || `Gagal (HTTP ${res.status})`);
-        return;
-      }
-      fetchData();
-    } catch (e: any) {
-      alert('Gagal: ' + (e?.message || 'unknown'));
-    }
+    await fetch('/api/admin/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'EXPIRE_PENDING', olderThanHours: Number(expireHours) }) });
+    fetchData();
   };
 
   const saveFaction = async () => {
@@ -1074,70 +995,39 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
     fetchData();
   };
 
-  // ═══════════ FIX UTAMA #2: addAdmin ═══════════
-  // - trim input
-  // - loading state supaya tidak dobel klik
-  // - baca & tampilkan error ASLI dari server (bukan "Gagal menambah admin." generik)
   const addAdmin = async () => {
+    setAdminErr('');
     const name = newAdmin.name.trim();
-    const devId = newAdmin.deviceId.trim();
-    if (!name || !devId) { alert('Nama dan Device ID wajib diisi.'); return; }
-
-    setAddingAdmin(true);
+    const id = newAdmin.deviceId.trim();
+    if (!name) { setAdminErr('Nama wajib diisi.'); return; }
+    if (!/^[A-Za-z0-9-]{8,64}$/.test(id)) { setAdminErr('Device ID tidak valid. Salin langsung dari Pengaturan > Device ID kamu di perangkat orang tersebut (tanpa spasi).'); return; }
+    const dup = admins.find(x => x.deviceId === id);
+    if (dup) { setAdminErr(`Device ID ini sudah terdaftar sebagai ${dup.name} (${dup.role}).`); return; }
+    if (newAdmin.role === 'SUPER' && !confirm('Super Admin bisa menambah/mencabut admin dan mengubah faction. Lanjutkan?')) return;
+    setAdminBusy(true);
     try {
-      const res = await fetch('/api/admin/admins', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, deviceId: devId, role: newAdmin.role }),
-      });
-      const raw = await res.text();
-      if (!res.ok) {
-        let msg = `Gagal menambah admin (HTTP ${res.status}).`;
-        try { const j = JSON.parse(raw); if (j?.error) msg = j.error; }
-        catch { if (raw) msg += ` — ${raw.slice(0, 140)}`; }
-        alert(msg);
-        return;
-      }
+      const res = await fetch('/api/admin/admins', { method: 'POST', headers: staffHeaders(deviceId), body: JSON.stringify({ name, deviceId: id, role: newAdmin.role }) });
+      if (!res.ok) { setAdminErr(`Gagal menambah admin (${await httpError(res)})`); return; }
       setNewAdmin({ name: '', deviceId: '', role: 'MOD' });
       fetchData();
-    } catch (e: any) {
-      alert('Gagal menghubungi server: ' + (e?.message || 'unknown'));
-    } finally {
-      setAddingAdmin(false);
-    }
+    } catch (e: any) { setAdminErr(`Gagal menghubungi server: ${e?.message || e}`); }
+    finally { setAdminBusy(false); }
   };
 
-  // FIX: removeAdmin juga tampilkan error asli
-  const removeAdmin = async (id: string) => {
-    if (!confirm('Cabut akses admin ini?')) return;
+  const removeAdmin = async (a: AdminUser) => {
+    setAdminErr('');
+    if (a.deviceId === deviceId) { setAdminErr('Kamu tidak bisa mencabut akses dirimu sendiri.'); return; }
+    if (!confirm(`Cabut akses ${a.name}?`)) return;
     try {
-      const res = await fetch(`/api/admin/admins?id=${id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        const raw = await res.text().catch(() => '');
-        let msg = `Gagal mencabut admin (HTTP ${res.status}).`;
-        try { const j = JSON.parse(raw); if (j?.error) msg = j.error; } catch {}
-        alert(msg);
-        return;
-      }
+      const res = await fetch(`/api/admin/admins?id=${encodeURIComponent(a.id)}`, { method: 'DELETE', headers: staffHeaders(deviceId, false) });
+      if (!res.ok) { setAdminErr(`Gagal mencabut admin (${await httpError(res)})`); return; }
       fetchData();
-    } catch (e: any) {
-      alert('Error: ' + (e?.message || 'unknown'));
-    }
+    } catch (e: any) { setAdminErr(`Gagal menghubungi server: ${e?.message || e}`); }
   };
 
   const resolveReport = async (id: string) => {
     await fetch('/api/reports', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action: 'RESOLVE' }) });
     fetchData();
-  };
-
-  const clearAiServerCache = async () => {
-    if (!confirm('Kosongkan cache faction di server? Nama akan ditanyakan ulang ke AI (memakai token).')) return;
-    setAiBusy(true);
-    try {
-      const res = await fetch('/api/admin/ai-usage', { method: 'POST', headers: staffHeaders(deviceId), body: JSON.stringify({ action: 'CLEAR_CACHE' }) });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); alert(j.error || 'Gagal mengosongkan cache'); }
-      fetchData();
-    } finally { setAiBusy(false); }
   };
 
   const toggleSelect = (id: string) => {
@@ -1152,6 +1042,7 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
     return matchSearch && matchFilter;
   });
 
+  const adminCandidates = requests.filter(r => r.status === 'APPROVED' && !admins.some(a => a.deviceId === r.deviceId));
   const adminNames = useMemo(() => Array.from(new Set(logs.map(l => l.adminName))), [logs]);
   const filteredLogs = useMemo(() => {
     const q = logText.trim().toLowerCase();
@@ -1211,12 +1102,11 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
                 const st = aiStats;
                 const maxDay = Math.max(1, ...st.days.map(d => d.chat + d.faction));
                 const budgets = [
-                  { label: 'Total semua fitur AI', used: st.today.tokens, cap: st.config.total, env: 'AI_DAILY_TOKEN_BUDGET' },
-                  { label: 'Auto-deteksi faction', used: st.today.faction, cap: st.config.faction, env: 'AI_FACTION_DAILY_BUDGET' },
+                  { label: 'Tanya AI', used: st.today.tokens, cap: st.config.total, env: 'AI_DAILY_TOKEN_BUDGET' },
                 ];
                 const cells = [
                   { label: 'Panggilan AI hari ini', value: fmt(st.today.calls), cls: 'text-main' },
-                  { label: 'Nama dijawab cache (hemat)', value: fmt(st.today.cacheHits), cls: 'text-emerald-500' },
+                  { label: 'Token hari ini', value: fmt(st.today.tokens), cls: 'text-main' },
                   { label: 'Error', value: fmt(st.today.errors), cls: st.today.errors ? 'text-red-500' : 'text-main' },
                   { label: '7 hari terakhir', value: `${fmt(st.last7)} token`, cls: 'text-main' },
                 ];
@@ -1241,7 +1131,6 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
                         );
                       })}
                       <div className="mt-3 text-[11px] text-subtle">Masuk {fmt(st.today.input)} · Keluar {fmt(st.today.output)}{st.today.estimatedCalls > 0 ? ` · ${st.today.estimatedCalls} panggilan berupa perkiraan (provider tidak mengirim usage)` : ''}</div>
-                      {!st.config.factionEnabled && <div className="mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-500">Auto-deteksi faction dimatikan (AI_FACTION_MATCH=off).</div>}
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -1256,7 +1145,7 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
                     <div className="rounded-xl border border-line bg-card p-5">
                       <div className="mb-3 flex items-center justify-between">
                         <h3 className="text-sm font-bold">14 hari terakhir</h3>
-                        <div className="flex gap-3 text-[11px] text-muted"><span className="flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-accent" />Tanya AI</span><span className="flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-amber-500" />Deteksi faction</span></div>
+                        <div className="flex gap-3 text-[11px] text-muted"><span className="flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-accent" />Tanya AI</span></div>
                       </div>
                       <div className="flex h-32 gap-1.5">
                         {st.days.map(d => {
@@ -1274,7 +1163,7 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
                       </div>
                     </div>
 
-                    <div className="grid gap-6 md:grid-cols-2">
+                    <div className="grid gap-6">
                       <div className="rounded-xl border border-line bg-card p-5">
                         <h3 className="mb-3 text-sm font-bold">Pengguna terboros hari ini</h3>
                         {st.topDevices.length === 0 ? <div className="py-4 text-center text-xs text-subtle">Belum ada pemakaian.</div> : (
@@ -1288,13 +1177,7 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
                           </table>
                         )}
                       </div>
-                      <div className="rounded-xl border border-line bg-card p-5">
-                        <h3 className="mb-3 text-sm font-bold">Cache faction di server</h3>
-                        <div className="text-3xl font-semibold text-main">{fmt(st.cacheRows)} <span className="text-sm font-normal text-muted">nama tersimpan</span></div>
-                        <p className="mt-2 text-[11px] leading-relaxed text-subtle">Nama yang sudah pernah dikenali dijawab dari sini tanpa memakai token, dan dipakai bersama semua user. Kosongkan hanya jika kamu mengubah aturan faction secara besar-besaran.</p>
-                        <button onClick={clearAiServerCache} disabled={aiBusy || st.cacheRows === 0} className="mt-4 rounded-lg bg-red-500/10 px-4 py-2 text-xs font-semibold text-red-500 hover:bg-red-500/20 disabled:opacity-40">{aiBusy ? 'Memproses…' : 'Kosongkan cache'}</button>
-                      </div>
-                    </div>
+                                          </div>
                   </>
                 );
               })()}
@@ -1508,32 +1391,40 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
           {activeTab === 'admins' && isSuper && (
             <div className="space-y-6">
               <div className="rounded-xl border border-line bg-card p-5">
-                <h3 className="mb-4 text-sm font-bold">Tambah Admin / Moderator</h3>
+                <h3 className="mb-1 text-sm font-bold">Tambah Admin / Moderator</h3>
+                <p className="mb-4 text-[11px] leading-relaxed text-subtle">Minta orangnya membuka Pengaturan (ikon gear) lalu menyalin <b>Device ID kamu</b>, atau pilih dari user yang sudah di-ACC.</p>
+                {adminCandidates.length > 0 && (
+                  <select
+                    value=""
+                    onChange={e => { const r = requests.find(x => x.id === e.target.value); if (r) setNewAdmin({ ...newAdmin, deviceId: r.deviceId }); }}
+                    className="mb-3 w-full rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent"
+                  >
+                    <option value="">Pilih dari user yang sudah di-ACC…</option>
+                    {adminCandidates.map(r => <option key={r.id} value={r.id}>{r.ipAddress} · {r.deviceId.slice(0, 8)}… · aktif {timeAgo(new Date(r.lastActive).getTime())}</option>)}
+                  </select>
+                )}
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
-                  <input type="text" value={newAdmin.name} onChange={e => setNewAdmin({ ...newAdmin, name: e.target.value })} placeholder="Nama" className="rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
+                  <input type="text" value={newAdmin.name} onChange={e => setNewAdmin({ ...newAdmin, name: e.target.value })} placeholder="Nama" maxLength={60} className="rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent" />
                   <input type="text" value={newAdmin.deviceId} onChange={e => setNewAdmin({ ...newAdmin, deviceId: e.target.value })} placeholder="Device ID" className="rounded-lg border border-line bg-app px-3 py-2 font-mono text-sm text-main outline-none focus:border-accent sm:col-span-2" />
                   <select value={newAdmin.role} onChange={e => setNewAdmin({ ...newAdmin, role: e.target.value as Role })} className="rounded-lg border border-line bg-app px-3 py-2 text-sm text-main outline-none focus:border-accent">
                     <option value="MOD">Moderator</option><option value="SUPER">Super Admin</option>
                   </select>
                 </div>
-                <div className="mt-4 flex justify-end">
-                  {/* FIX: tombol punya loading state supaya tidak dobel kirim */}
-                  <button onClick={addAdmin} disabled={addingAdmin} className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed">
-                    {addingAdmin ? 'Menambah…' : 'Tambah'}
-                  </button>
-                </div>
-                <p className="mt-2 text-[11px] text-subtle">Moderator hanya bisa mengelola user (ACC / timeout / ban). Faction, log, dan admin hanya untuk Super Admin.</p>
+                {adminErr && <div className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{adminErr}</div>}
+                <div className="mt-4 flex justify-end"><button onClick={addAdmin} disabled={adminBusy} className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-text hover:bg-accent-hover disabled:opacity-50">{adminBusy ? 'Menambahkan…' : 'Tambah'}</button></div>
+                <p className="mt-2 text-[11px] text-subtle">Moderator hanya bisa mengelola user (ACC / timeout / ban). Faction, log, admin, dan AI hanya untuk Super Admin.</p>
               </div>
+              {adminsError && <div className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">Gagal memuat daftar admin ({adminsError})</div>}
               <div className="rounded-xl border border-line bg-card overflow-hidden">
                 <table className="w-full text-sm text-left">
                   <thead className="bg-hover text-subtle text-[10px] uppercase tracking-wider sm:text-xs"><tr><th className="px-4 py-3">Nama</th><th className="px-4 py-3">Device ID</th><th className="px-4 py-3">Role</th><th className="px-4 py-3 text-right">Aksi</th></tr></thead>
                   <tbody>
                     {admins.map(a => (
                       <tr key={a.id} className="border-t border-line hover:bg-hover/50">
-                        <td className="px-4 py-3 font-medium text-main">{a.name}</td>
+                        <td className="px-4 py-3 font-medium text-main">{a.name}{a.deviceId === deviceId && <span className="ml-2 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-bold text-accent">KAMU</span>}</td>
                         <td className="px-4 py-3 font-mono text-[11px] text-subtle">{a.deviceId}</td>
-                        <td className="px-4 py-3"><span className={`rounded px-2 py-0.5 text-[10px] font-bold ${a.role === 'SUPER' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-blue-500/20 text-blue-500'}`}>{a.role}</span></td>
-                        <td className="px-4 py-3 text-right"><button onClick={() => removeAdmin(a.id)} className="rounded px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-500/10">Cabut</button></td>
+                        <td className="px-4 py-3"><span className={`rounded px-2 py-0.5 text-[10px] font-bold ${String(a.role).toUpperCase().includes('SUPER') ? 'bg-emerald-500/20 text-emerald-500' : 'bg-blue-500/20 text-blue-500'}`}>{a.role}</span></td>
+                        <td className="px-4 py-3 text-right"><button onClick={() => removeAdmin(a)} disabled={a.deviceId === deviceId} className="rounded px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-500/10 disabled:opacity-30">Cabut</button></td>
                       </tr>
                     ))}
                     {admins.length === 0 && <tr><td colSpan={4} className="px-4 py-10 text-center text-subtle">Belum ada data.</td></tr>}
@@ -1658,24 +1549,6 @@ function Home({ isAdmin, deviceId, role, viewMode, onSwitchMode, settings, onOpe
   const [relasi, setRelasi] = useState<Relasi[]>([]);
   const [relasiLoading, setRelasiLoading] = useState(true);
   const [relasiOpen, setRelasiOpen] = useState(false);
-
-  // Cache hasil AI faction (nama -> faction), disimpan di perangkat
-  const [aiCache, setAiCache] = useState<AiFactionCache>({});
-  const aiLastFailRef = useRef(0);
-  const aiLastCallRef = useRef(0);
-  const aiBusyRef = useRef(false);
-  const aiPausedUntilRef = useRef(0);
-
-  useEffect(() => {
-    try { const raw = localStorage.getItem('ime-ai-faction-cache'); if (raw) setAiCache(JSON.parse(raw)); } catch { /* ignore */ }
-  }, []);
-  useEffect(() => {
-    try { localStorage.setItem('ime-ai-faction-cache', JSON.stringify(aiCache)); } catch { /* ignore */ }
-  }, [aiCache]);
-  const clearAiCache = useCallback(() => {
-    setAiCache({});
-    try { localStorage.removeItem('ime-ai-faction-cache'); } catch { /* ignore */ }
-  }, []);
 
   const showRelasi = isAdmin && viewMode === 'CC'; // relasi khusus Crimson Creed
 
@@ -1906,62 +1779,12 @@ function Home({ isAdmin, deviceId, role, viewMode, onSwitchMode, settings, onOpe
   const matchers = useMemo(() => buildMatchers(factions), [factions]);
   const factionMap = useMemo(() => { const m = new Map<string, FactionDef>(); factions.forEach(f => m.set(f.id, f)); return m; }, [factions]);
 
+  // Deteksi faction 100% lokal (aturan nama/alias), tanpa AI dan tanpa token
   const enriched: EnrichedPlayer[] = useMemo(() => (data?.players ?? []).map(p => {
-    let faction = detectFaction(p.name, matchers);
-    if (faction === 'WARGA' && aiCache[p.name]) {
-      const cached = aiCache[p.name].faction;
-      if (cached && cached !== 'WARGA' && factionMap.has(cached)) faction = cached;
-    }
+    const faction = detectFaction(p.name, matchers);
     const side: Side | 'CIVIL' = faction === 'WARGA' ? 'CIVIL' : resolveSide(factionMap.get(faction));
     return { ...p, faction, side };
-  }), [data, matchers, factionMap, aiCache]);
-
-  // Tanya AI HANYA untuk nama yang menyerupai alias faction, belum ada di cache, dan hanya jika tab aktif.
-  useEffect(() => {
-    if (!data?.players?.length || !factions.length || !deviceId) return;
-    if (typeof document !== 'undefined' && document.hidden) return;
-    const now = Date.now();
-    if (aiBusyRef.current || now < aiPausedUntilRef.current) return;
-    if (now - aiLastFailRef.current < AI_FAIL_COOLDOWN || now - aiLastCallRef.current < AI_MIN_INTERVAL) return;
-
-    const seen = new Set<string>();
-    const batch: string[] = [];
-    for (const p of data.players) {
-      if (!p.name || seen.has(p.name)) continue;
-      seen.add(p.name);
-      const c = aiCache[p.name];
-      if (c && now - c.t < AI_CLIENT_TTL) continue;
-      if (detectFaction(p.name, matchers) !== 'WARGA') continue;
-      if (!aiCandidate(p.name, matchers)) continue;
-      batch.push(p.name);
-      if (batch.length >= AI_BATCH) break;
-    }
-    if (!batch.length) return;
-
-    aiBusyRef.current = true;
-    aiLastCallRef.current = now;
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 25_000);
-
-    fetch('/api/ai/faction-match', {
-      method: 'POST',
-      signal: ctrl.signal,
-      headers: staffHeaders(deviceId),
-      body: JSON.stringify({ names: batch, factions: factions.map(f => ({ id: f.id, label: f.label, short: f.short })) }),
-    })
-      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`))))
-      .then((res: { assignments?: { name: string; factionId: string }[]; disabled?: boolean; budgetExceeded?: boolean }) => {
-        if (res.disabled || res.budgetExceeded) aiPausedUntilRef.current = Date.now() + 30 * 60_000; // kuota habis / fitur mati: istirahat 30 menit
-        const add: AiFactionCache = {};
-        const t = Date.now();
-        for (const a of res.assignments ?? []) if (a?.name) add[a.name] = { faction: a.factionId, t };
-        if (Object.keys(add).length) setAiCache(prev => ({ ...prev, ...add }));
-      })
-      .catch(err => { aiLastFailRef.current = Date.now(); console.warn('[ai/faction-match] gagal:', err?.message ?? err); })
-      .finally(() => { clearTimeout(timer); aiBusyRef.current = false; });
-    // aiCache sengaja tidak di deps supaya tidak loop
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, factions, matchers, deviceId]);
+  }), [data, matchers, factionMap]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { SEMUA: enriched.length, GOOD: 0, BAD: 0, CIVILIAN: 0 };
@@ -2730,6 +2553,14 @@ const FIELD = 'w-full rounded-xl border border-line bg-app px-3 py-2.5 text-sm t
 const LABEL = 'mb-1 block text-[11px] font-semibold text-muted';
 const EMPTY_RELASI: RelasiForm = { citizenId: '', firstName: '', lastName: '', dob: '', sex: '', nationality: '', rank: '', relation: '', notes: '', active: true };
 
+/* Ubah respons gagal menjadi teks yang bisa dibaca: "HTTP 409: Device ID sudah terdaftar" */
+async function httpError(res: Response): Promise<string> {
+  const text = await res.text().catch(() => '');
+  let msg = text;
+  try { msg = JSON.parse(text).error || text; } catch { /* bukan JSON */ }
+  return `HTTP ${res.status}${msg ? `: ${String(msg).replace(/\s+/g, ' ').slice(0, 200)}` : ''}`;
+}
+
 const staffHeaders = (deviceId: string, json = true): HeadersInit => ({ ...(json ? { 'Content-Type': 'application/json' } : {}), 'x-device-id': deviceId });
 const fullName = (r: { firstName: string; lastName: string }) => `${r.firstName} ${r.lastName}`.trim();
 const toForm = (r: Relasi): RelasiForm => ({ id: r.id, citizenId: r.citizenId, firstName: r.firstName, lastName: r.lastName, dob: r.dob ?? '', sex: r.sex ?? '', nationality: r.nationality ?? '', rank: r.rank ?? '', relation: r.relation ?? '', notes: r.notes ?? '', active: r.active });
@@ -2746,6 +2577,276 @@ async function imageToJpeg(file: Blob, maxW = 1400): Promise<{ data: string; pre
     const dataUrl = c.toDataURL('image/jpeg', 0.85);
     return { data: dataUrl.split(',')[1], preview: dataUrl };
   } finally { URL.revokeObjectURL(url); }
+}
+
+/* ───── OCR KTP lokal: fungsi murni (tanpa AI, tanpa token) ───── */
+type OcrWord = { text: string; x0: number; y0: number; x1: number; y1: number };
+type KtpGeo = { xL: number; labelEnd: number; pitch: number; rows: number[] };
+const KTP_FIELDS = ['lastName', 'firstName', 'dob', 'sex', 'nationality', 'citizenId'] as const;
+type KtpField = (typeof KTP_FIELDS)[number];
+
+const alnum = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+const titleCase = (s: string) => s.toLowerCase().replace(/(^|[\s'-])\p{L}/gu, c => c.toUpperCase());
+
+function lev(a: string, b: string): number {
+  const dp: number[] = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = dp[j];
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = tmp;
+    }
+  }
+  return dp[b.length];
+}
+
+/* Cari label kartu ("LAST NAME", "FIRST NAME", "DOB", "SEX", "NATIONALITY", "CITIZEN ID") dari kata hasil OCR.
+   Enam baris berjarak sama, jadi baris yang labelnya salah baca (mis. "DOB" terbaca "bos") tetap bisa dihitung. */
+function locateKtp(words: OcrWord[]): KtpGeo | null {
+  type Anchor = { row: number; y: number; x0: number; x1: number; h: number };
+  const defs: { row: number; first: string; second?: string; maxD: number }[] = [
+    { row: 0, first: 'LAST', second: 'NAME', maxD: 1 },
+    { row: 1, first: 'FIRST', second: 'NAME', maxD: 1 },
+    { row: 2, first: 'DOB', maxD: 0 },
+    { row: 3, first: 'SEX', maxD: 0 },
+    { row: 4, first: 'NATIONALITY', maxD: 2 },
+    { row: 5, first: 'CITIZEN', second: 'ID', maxD: 1 },
+  ];
+  const found: Anchor[] = [];
+  for (const w of words) {
+    const n = alnum(w.text);
+    if (n.length < 3) continue;
+    const h = w.y1 - w.y0;
+    const yc = (w.y0 + w.y1) / 2;
+    for (const d of defs) {
+      if (lev(n, d.first) > d.maxD) continue;
+      let x1 = w.x1;
+      if (d.second) {
+        const nxt = words.find(v => v !== w && Math.abs((v.y0 + v.y1) / 2 - yc) < h * 0.7 && v.x0 >= w.x1 - h && v.x0 - w.x1 < h * 3 && lev(alnum(v.text), d.second!) <= 1);
+        if (!nxt) continue;
+        x1 = nxt.x1;
+      }
+      found.push({ row: d.row, y: yc, x0: w.x0, x1, h });
+    }
+  }
+  if (found.length < 2) return null;
+
+  // Ambil kelompok label yang sejajar (x awal berdekatan) dengan baris berbeda terbanyak
+  let best: Anchor[] = [];
+  for (const a of found) {
+    const grp = found.filter(b => Math.abs(b.x0 - a.x0) < a.h * 2.5);
+    const uniq = new Map<number, Anchor>();
+    for (const g of grp) if (!uniq.has(g.row)) uniq.set(g.row, g);
+    if (uniq.size > best.length) best = Array.from(uniq.values());
+  }
+  if (best.length < 2) return null;
+  best.sort((p, q) => p.row - q.row);
+
+  const A = best[0], B = best[best.length - 1];
+  const pitch = (B.y - A.y) / (B.row - A.row);
+  const hMed = best.map(b => b.h).sort((p, q) => p - q)[Math.floor(best.length / 2)];
+  if (!(pitch > hMed * 0.8 && pitch < hMed * 3.5)) return null;
+
+  return {
+    xL: Math.min(...best.map(b => b.x0)),
+    labelEnd: Math.max(...best.map(b => b.x1)),
+    pitch,
+    rows: KTP_FIELDS.map((_, i) => A.y + (i - A.row) * pitch),
+  };
+}
+
+const NATIONALITIES = ['Indonesian', 'American', 'Malaysian', 'Singaporean', 'Japanese', 'Korean', 'Chinese', 'British', 'Australian', 'Filipino', 'Thai', 'Indian', 'German', 'French', 'Russian', 'Italian', 'Spanish', 'Brazilian', 'Canadian', 'Dutch', 'Turkish', 'Vietnamese', 'Mexican'];
+
+const DIGIT_CONFUSION: Record<string, string> = { '8': '036', '6': '085', '3': '85', '0': '86', '5': '63', '1': '7', '7': '1', '9': '4', '4': '9' };
+const validYmd = (y: number, m: number, d: number) => y >= 1900 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31;
+
+function cleanDob(raw: string): string {
+  const map: Record<string, string> = { O: '0', Q: '0', D: '0', I: '1', L: '1', '|': '1', Z: '2', S: '5', G: '6', B: '8' };
+  const t = raw.toUpperCase().replace(/[OQDIL|ZSGB]/g, c => map[c] ?? c);
+  const ymd = t.match(/(\d{4})\D*(\d{2})\D*(\d{2})/);
+  const dmy = t.match(/(\d{2})\D+(\d{2})\D+(\d{4})/);
+  const parts = ymd ? [ymd[1], ymd[2], ymd[3]] : dmy ? [dmy[3], dmy[2], dmy[1]] : null;
+  if (!parts) return '';
+  const digits = parts.join('');
+  const fmtD = (x: string) => `${x.slice(0, 4)}-${x.slice(4, 6)}-${x.slice(6, 8)}`;
+  const ok = (x: string) => validYmd(+x.slice(0, 4), +x.slice(4, 6), +x.slice(6, 8));
+  if (ok(digits)) return fmtD(digits);
+  // Perbaiki 1 digit yang mudah tertukar (8↔0↔3, 6↔5, dst.). Hanya dipakai jika hasilnya TUNGGAL (tidak ambigu).
+  const cands = new Set<string>();
+  for (let i = 0; i < 8; i++) for (const c of DIGIT_CONFUSION[digits[i]] ?? '') {
+    const x = digits.slice(0, i) + c + digits.slice(i + 1);
+    if (ok(x)) cands.add(x);
+  }
+  return cands.size === 1 ? fmtD(Array.from(cands)[0]) : '';
+}
+
+/* Ubah teks mentah tiap baris menjadi field form. Nilai yang tidak meyakinkan dikosongkan (user mengisi manual). */
+function cleanKtp(raw: Partial<Record<KtpField, string>>): Record<KtpField, string> {
+  const nameOf = (s?: string) => titleCase((s ?? '').replace(/[^A-Za-z' -]/g, ' ').replace(/\s+/g, ' ').trim());
+  const sexRaw = alnum(raw.sex ?? '');
+  const nat = alnum(raw.nationality ?? '');
+  let nationality = '';
+  if (nat.length >= 4) {
+    let best = '', bd = 99;
+    for (const c of NATIONALITIES) { const d = lev(nat, c.toUpperCase()); if (d < bd) { bd = d; best = c; } }
+    nationality = bd <= Math.max(2, Math.floor(nat.length * 0.34)) ? best : titleCase(nat);
+  }
+  const cid = alnum(raw.citizenId ?? '');
+  return {
+    lastName: nameOf(raw.lastName),
+    firstName: nameOf(raw.firstName),
+    dob: cleanDob(raw.dob ?? ''),
+    sex: sexRaw.includes('FEMALE') || sexRaw.startsWith('FEM') ? 'FEMALE' : sexRaw.includes('MALE') || sexRaw === 'M' ? 'MALE' : '',
+    nationality,
+    citizenId: cid.length >= 4 && cid.length <= 16 ? cid : '',
+  };
+}
+
+/* Geometri potongan pass-2 (koordinat gambar asli). scale1 = skala gambar pass-1 terhadap gambar asli. */
+function planKtpCrop(geo: KtpGeo, scale1: number, imgW: number, imgH: number, targetPitch = 96) {
+  const pitch = geo.pitch / scale1;
+  const rows = geo.rows.map(r => r / scale1);
+  const left = Math.max(0, geo.labelEnd / scale1 + 0.3 * pitch);   // mulai SETELAH label terpanjang (menghindari sisa huruf label)
+  const right = Math.min(imgW, geo.xL / scale1 + 10.05 * pitch);   // tepi kanan kartu ± 10 x jarak baris dari awal label
+  const top = Math.max(0, rows[0] - 0.8 * pitch);
+  const bottom = Math.min(imgH, rows[5] + 0.8 * pitch);
+  const scale2 = Math.min(10, Math.max(1, targetPitch / pitch));   // target jarak baris ± targetPitch px
+  const pad = 24;
+  return {
+    sx: left, sy: top, sw: right - left, sh: bottom - top, scale2, pad,
+    rects: rows.map(r => ({                                    // rectangle tiap baris di kanvas pass-2
+      left: 0, width: Math.round((right - left) * scale2) + pad * 2,
+      top: Math.max(0, Math.round((r - 0.55 * pitch - top) * scale2) + pad),
+      height: Math.round(1.1 * pitch * scale2),
+    })),
+    outW: Math.round((right - left) * scale2) + pad * 2,
+    outH: Math.round((bottom - top) * scale2) + pad * 2,
+  };
+}
+
+/* Gabungkan beberapa kali pembacaan (skala berbeda) per kolom: nilai valid diutamakan, lalu suara terbanyak. */
+function mergeKtp(sets: Record<KtpField, string>[]): Record<KtpField, string> {
+  const vote = (f: KtpField, ok: (v: string) => boolean = v => !!v): { v: string; n: number } => {
+    const count = new Map<string, number>();
+    for (const x of sets) { const v = x[f]; if (ok(v)) count.set(v, (count.get(v) ?? 0) + 1); }
+    const top = Array.from(count.entries()).sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)[0];
+    return top ? { v: top[0], n: top[1] } : { v: '', n: 0 };
+  };
+  const natKnown = vote('nationality', v => NATIONALITIES.includes(v));
+  const natAny = vote('nationality');
+  const cid = vote('citizenId', v => v.length >= 6);
+  return {
+    lastName: vote('lastName').v,
+    firstName: vote('firstName').v,
+    dob: vote('dob').v,
+    sex: vote('sex').v,
+    nationality: natKnown.v || (natAny.n >= 2 ? natAny.v : ''),   // kebangsaan di luar daftar hanya dipakai jika konsisten di >= 2 bacaan
+    citizenId: cid.v || vote('citizenId').v,
+  };
+}
+
+/* Konversi ke abu-abu + regangan kontras; jika binarize=true -> hitam-putih tegas (ambang Otsu) untuk membuang tekstur latar kartu */
+function grayStretch(ctx: CanvasRenderingContext2D, w: number, h: number, binarize: boolean) {
+  const im = ctx.getImageData(0, 0, w, h);
+  const d = im.data;
+  const g = new Uint8Array(w * h);
+  const hist = new Uint32Array(256);
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) { const v = ((d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000) | 0; g[j] = v; hist[v]++; }
+  const total = g.length;
+  let lo = 0, hi = 255, acc = 0;
+  for (let i = 0; i < 256; i++) { acc += hist[i]; if (acc >= total * 0.01) { lo = i; break; } }
+  acc = 0;
+  for (let i = 255; i >= 0; i--) { acc += hist[i]; if (acc >= total * 0.01) { hi = i; break; } }
+  const span = Math.max(1, hi - lo);
+  const h2 = new Uint32Array(256);
+  for (let j = 0; j < total; j++) { const v = Math.max(0, Math.min(255, (((g[j] - lo) * 255) / span) | 0)); g[j] = v; h2[v]++; }
+  let T = 128;
+  if (binarize) {
+    let sumAll = 0; for (let i = 0; i < 256; i++) sumAll += i * h2[i];
+    let wB = 0, sumB = 0, best = 0;
+    for (let t = 0; t < 256; t++) {
+      wB += h2[t]; if (wB === 0) continue;
+      const wF = total - wB; if (wF === 0) break;
+      sumB += t * h2[t];
+      const mB = sumB / wB, mF = (sumAll - sumB) / wF;
+      const v = wB * wF * (mB - mF) * (mB - mF);
+      if (v > best) { best = v; T = t; }
+    }
+  }
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) { const v = binarize ? (g[j] > T ? 255 : 0) : g[j]; d[i] = v; d[i + 1] = v; d[i + 2] = v; d[i + 3] = 255; }
+  ctx.putImageData(im, 0, 0);
+}
+
+function collectOcrWords(data: any): OcrWord[] {
+  const raw: any[] = Array.isArray(data?.words) && data.words.length
+    ? data.words
+    : (data?.blocks ?? []).flatMap((b: any) => (b.paragraphs ?? []).flatMap((p: any) => (p.lines ?? []).flatMap((l: any) => l.words ?? [])));
+  return raw.filter(w => w?.bbox && typeof w.text === 'string').map(w => ({ text: w.text, x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 }));
+}
+
+/* Baca KTP "Los Santos Identity" dari screenshot, 100% di browser (tesseract.js). Tanpa AI, tanpa token, gambar tidak dikirim ke mana pun.
+   Tahap 1: baca seluruh screenshot untuk menemukan kartu. Tahap 2: potong tiap baris, perbesar, hitam-putihkan,
+   baca dengan daftar karakter yang diizinkan per kolom, diulang di 3 skala lalu digabung. */
+async function readKtpLocal(file: Blob, note: (t: string) => void): Promise<Partial<RelasiForm>> {
+  const url = URL.createObjectURL(file);
+  let worker: any = null;
+  try {
+    const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('File bukan gambar yang valid')); i.src = url; });
+    const mk = (w: number, h: number) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return { c, x: c.getContext('2d', { willReadFrequently: true })! }; };
+
+    const s1 = Math.min(3, Math.max(1, 3200 / img.width));
+    const p1 = mk(Math.round(img.width * s1), Math.round(img.height * s1));
+    p1.x.imageSmoothingQuality = 'high';
+    p1.x.drawImage(img, 0, 0, p1.c.width, p1.c.height);
+    grayStretch(p1.x, p1.c.width, p1.c.height, false);
+
+    note('Menyiapkan OCR… (pertama kali mengunduh data bahasa ± 4 MB)');
+    const { createWorker } = await import('tesseract.js');
+    worker = await createWorker('eng', 1, { logger: (m: any) => { if (m?.status === 'recognizing text') note(`Membaca teks… ${Math.round((m.progress ?? 0) * 100)}%`); } });
+    await worker.setParameters({ tessedit_pageseg_mode: '11' } as any);
+
+    note('Mencari kartu KTP…');
+    const r1: any = await worker.recognize(p1.c, {}, { blocks: true });
+    const geo = locateKtp(collectOcrWords(r1?.data));
+    if (!geo) throw new Error('Kartu "Los Santos Identity" tidak ditemukan. Pakai screenshot yang menampilkan kartu dengan jelas (resolusi penuh lebih akurat).');
+
+    const WL: Record<KtpField, string> = {
+      lastName: "ABCDEFGHIJKLMNOPQRSTUVWXYZ '-", firstName: "ABCDEFGHIJKLMNOPQRSTUVWXYZ '-",
+      dob: '0123456789-', sex: 'MALEFmalefa', nationality: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+      citizenId: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+    };
+    const sets: Record<KtpField, string>[] = [];
+    for (const tp of [96, 140, 200]) {
+      note(`Membaca kolom data… (${sets.length + 1}/3)`);
+      const plan = planKtpCrop(geo, s1, img.width, img.height, tp);
+      const p2 = mk(plan.outW, plan.outH);
+      p2.x.fillStyle = '#fff';
+      p2.x.fillRect(0, 0, plan.outW, plan.outH);
+      p2.x.imageSmoothingQuality = 'high';
+      p2.x.drawImage(img, plan.sx, plan.sy, plan.sw, plan.sh, plan.pad, plan.pad, plan.sw * plan.scale2, plan.sh * plan.scale2);
+      grayStretch(p2.x, plan.outW, plan.outH, true);
+
+      const raw = {} as Record<KtpField, string>;
+      for (let i = 0; i < KTP_FIELDS.length; i++) {
+        const f = KTP_FIELDS[i], r = plan.rects[i];
+        await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: WL[f] } as any);
+        const rr: any = await worker.recognize(p2.c, { rectangle: { left: r.left, top: r.top, width: Math.min(r.width, plan.outW), height: Math.max(8, Math.min(r.height, plan.outH - r.top)) } }, { text: true });
+        raw[f] = String(rr?.data?.text ?? '').trim();
+      }
+      sets.push(cleanKtp(raw));
+    }
+
+    const m = mergeKtp(sets);
+    const out: Partial<RelasiForm> = {};
+    KTP_FIELDS.forEach(k => { if (m[k]) out[k] = m[k]; });
+    if (Object.keys(out).length === 0) throw new Error('Kartu ditemukan, tetapi teksnya tidak terbaca. Coba screenshot yang lebih besar dan jelas.');
+    return out;
+  } finally {
+    URL.revokeObjectURL(url);
+    if (worker) await worker.terminate().catch(() => {});
+  }
 }
 
 /* ── Monitoring relasi di dashboard mode CC ── */
@@ -2798,6 +2899,7 @@ function RelasiFormSheet({ open, initial, deviceId, items, onClose, onSaved, not
   const [err, setErr] = useState('');
   const [scan, setScan] = useState<'idle' | 'scanning' | 'done' | 'error'>('idle');
   const [scanMsg, setScanMsg] = useState('');
+  const [scanNote, setScanNote] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
   const [drag, setDrag] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -2810,27 +2912,20 @@ function RelasiFormSheet({ open, initial, deviceId, items, onClose, onSaved, not
   const set = <K extends keyof RelasiForm>(k: K, v: RelasiForm[K]) => setF(p => ({ ...p, [k]: v }));
 
   const scanFile = useCallback(async (file: Blob) => {
-    setScan('scanning'); setScanMsg(''); setErr('');
+    setScan('scanning'); setScanNote('Menyiapkan…'); setScanMsg(''); setErr('');
     try {
-      const { data, preview: pv } = await imageToJpeg(file);
-      setPreview(pv);
-      const res = await fetch('/api/relasi/scan', { method: 'POST', headers: staffHeaders(deviceId), body: JSON.stringify({ image: data, mime: 'image/jpeg' }) });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || 'Gagal membaca KTP');
-      const d = (json.data ?? {}) as Record<string, unknown>;
-      const patch: Partial<RelasiForm> = {};
-      (['firstName', 'lastName', 'citizenId', 'dob', 'sex', 'nationality', 'rank'] as const).forEach(k => {
-        const v = d[k];
-        if (typeof v === 'string' && v.trim()) patch[k] = v.trim();
-      });
+      imageToJpeg(file, 700).then(r => setPreview(r.preview)).catch(() => {});   // hanya pratinjau
+      const patch = await readKtpLocal(file, setScanNote);                         // OCR lokal: tanpa AI, tanpa token
       const found = patch.citizenId ? items.find(i => i.citizenId === patch.citizenId) : undefined;
       setF(prev => (found && !prev.id ? { ...toForm(found), ...patch } : { ...prev, ...patch }));
       setScan('done');
-      setScanMsg(found ? 'Citizen ID sudah terdaftar, form dibuka dalam mode edit.' : 'Terisi otomatis. Periksa kembali sebelum menyimpan.');
+      setScanMsg(found
+        ? 'Citizen ID sudah terdaftar, form dibuka dalam mode edit. Periksa kembali isiannya.'
+        : 'Terisi otomatis lewat OCR. Huruf yang mirip (B/8, I/L, O/0) bisa salah baca, jadi periksa SEMUA kolom sebelum menyimpan.');
     } catch (e: any) {
       setScan('error'); setScanMsg(e?.message || 'Gagal membaca KTP');
     }
-  }, [deviceId, items]);
+  }, [items]);
 
   // Ctrl+V gambar langsung ke form
   useEffect(() => {
@@ -2872,7 +2967,7 @@ function RelasiFormSheet({ open, initial, deviceId, items, onClose, onSaved, not
             <div className="py-3">
               <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-2xl bg-accent/15 text-accent"><ScanIcon className="h-6 w-6" /></div>
               <div className="text-sm font-medium text-main">Isi otomatis dari screenshot KTP</div>
-              <div className="mt-1 text-[11px] text-muted">Tempel (Ctrl+V), seret gambar ke sini, atau pilih file</div>
+              <div className="mt-1 text-[11px] text-muted">Tempel (Ctrl+V), seret gambar ke sini, atau pilih file · dibaca di browser, gratis</div>
             </div>
           )}
           <button onClick={() => fileRef.current?.click()} disabled={scan === 'scanning'} className="mt-3 rounded-lg bg-hover px-3 py-1.5 text-xs font-medium text-main disabled:opacity-50">{preview ? 'Ganti gambar' : 'Pilih gambar'}</button>
@@ -2880,7 +2975,7 @@ function RelasiFormSheet({ open, initial, deviceId, items, onClose, onSaved, not
           {scan === 'scanning' && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-card/85 backdrop-blur-sm">
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-              <span className="text-xs font-medium text-main">Membaca KTP…</span>
+              <span className="px-4 text-center text-xs font-medium text-main">{scanNote || 'Membaca KTP…'}</span>
             </div>
           )}
         </div>
