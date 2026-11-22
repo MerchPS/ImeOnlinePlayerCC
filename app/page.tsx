@@ -1088,7 +1088,7 @@ function CompactRelasiPanel({ open, onClose, deviceId, items, onReload }: { open
 
 /* ══════════════ Admin Panel Component ══════════════ */
 function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose: () => void; role: Role; deviceId: string }) {
-  const [tab, setTab] = useState<'requests' | 'reports' | 'admins' | 'audit' | 'factions'>('requests');
+  const [tab, setTab] = useState<'requests' | 'reports' | 'admins' | 'audit' | 'factions' | 'database'>('requests');
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [reports, setReports] = useState<BugReport[]>([]);
   const [admins, setAdmins] = useState<AdminUser[]>([]);
@@ -1146,7 +1146,7 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
   };
 
   if (!open) return null;
-  const tabs: { id: typeof tab; label: string }[] = [{ id: 'requests', label: 'Requests' }, { id: 'reports', label: 'Reports' }];
+  const tabs: { id: typeof tab; label: string }[] = [{ id: 'requests', label: 'Requests' }, { id: 'reports', label: 'Reports' }, { id: 'database', label: 'Admin Database' }];
   if (isSuper) tabs.push({ id: 'admins', label: 'Admins' }, { id: 'audit', label: 'Audit' }, { id: 'factions', label: 'Factions' });
 
   return (
@@ -1158,6 +1158,7 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
       <nav className="flex gap-2 overflow-x-auto border-b border-line px-4 py-3">{tabs.map(t => <button key={t.id} onClick={() => setTab(t.id)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${tab === t.id ? 'bg-accent text-accent-text' : 'bg-card text-muted'}`}>{t.label}</button>)}</nav>
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         {error && <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">{error}</div>}
+        {tab === 'database' && <AdminDatabase role={role} deviceId={deviceId} />}
         {tab === 'requests' && <div className="mx-auto max-w-5xl space-y-2">{requests.map(r => <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-card p-4"><div className="min-w-0"><div className="text-sm font-semibold">{r.status}</div><div className="mt-1 break-all font-mono text-[11px] text-subtle">{r.deviceId} · {r.ipAddress}</div></div><div className="flex items-center gap-2"><CopyButton value={r.deviceId} /><button onClick={() => action(r.id, 'APPROVE')} className="rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-500">ACC</button><button onClick={() => action(r.id, 'REVOKE')} className="rounded-lg bg-hover px-3 py-2 text-xs">Revoke</button><button onClick={() => action(r.id, 'BAN')} className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">Ban</button></div></div>)}</div>}
         {tab === 'reports' && <div className="mx-auto max-w-5xl space-y-2">{reports.map(r => <div key={r.id} className="rounded-xl border border-line bg-card p-4"><div className="text-[11px] text-subtle">{r.deviceId} · {formatDate(r.createdAt)}</div><div className="mt-1 text-sm">{r.message}</div></div>)}</div>}
         {tab === 'admins' && <div className="mx-auto max-w-5xl space-y-5">
@@ -1174,6 +1175,239 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
         {tab === 'factions' && <div className="mx-auto max-w-5xl grid gap-2 sm:grid-cols-2">{factions.map(f => <div key={f.id} className="rounded-xl border border-line bg-card p-4"><FactionTag fac={f} variant="pill" /><div className="mt-2 text-xs text-muted">{f.label}</div></div>)}</div>}
       </div>
     </div>
+  );
+}
+
+type DatabaseTableKey = 'relasi' | 'requests' | 'reports' | 'admins' | 'audit' | 'factions';
+type DatabaseColumn = { key: string; label: string; mono?: boolean };
+type DatabaseRow = Record<string, unknown>;
+
+const DATABASE_TABLES: { id: DatabaseTableKey; label: string; description: string; columns: DatabaseColumn[] }[] = [
+  { id: 'relasi', label: 'Relasi', description: 'Data relasi dan sumpah darah', columns: [{ key: 'id', label: 'ID', mono: true }, { key: 'firstName', label: 'Nama depan' }, { key: 'lastName', label: 'Nama belakang' }, { key: 'citizenId', label: 'Citizen ID', mono: true }, { key: 'bloodOathDate', label: 'Sumpah darah' }, { key: 'createdAt', label: 'Dibuat', mono: true }] },
+  { id: 'requests', label: 'Access Requests', description: 'Permintaan akses staff', columns: [{ key: 'id', label: 'ID', mono: true }, { key: 'deviceId', label: 'Device ID', mono: true }, { key: 'status', label: 'Status' }, { key: 'ipAddress', label: 'IP Address', mono: true }, { key: 'createdAt', label: 'Dibuat', mono: true }] },
+  { id: 'reports', label: 'Bug Reports', description: 'Laporan yang dikirim pengguna', columns: [{ key: 'id', label: 'ID', mono: true }, { key: 'deviceId', label: 'Device ID', mono: true }, { key: 'status', label: 'Status' }, { key: 'message', label: 'Pesan' }, { key: 'createdAt', label: 'Dibuat', mono: true }] },
+  { id: 'admins', label: 'Admin Users', description: 'Akun staff terdaftar', columns: [{ key: 'id', label: 'ID', mono: true }, { key: 'name', label: 'Nama' }, { key: 'deviceId', label: 'Device ID', mono: true }, { key: 'role', label: 'Role' }, { key: 'createdAt', label: 'Dibuat', mono: true }] },
+  { id: 'audit', label: 'Audit Log', description: 'Aktivitas sistem terbaru', columns: [{ key: 'id', label: 'ID', mono: true }, { key: 'action', label: 'Aksi' }, { key: 'adminName', label: 'Staff' }, { key: 'targetDeviceId', label: 'Target', mono: true }, { key: 'details', label: 'Detail' }, { key: 'createdAt', label: 'Waktu', mono: true }] },
+  { id: 'factions', label: 'Factions', description: 'Konfigurasi faction yang tersedia', columns: [{ key: 'id', label: 'ID', mono: true }, { key: 'label', label: 'Nama' }, { key: 'short', label: 'Alias', mono: true }, { key: 'matchType', label: 'Match' }, { key: 'side', label: 'Side' }, { key: 'createdAt', label: 'Dibuat', mono: true }] },
+];
+
+function AdminDatabase({ role, deviceId }: { role: Role; deviceId: string }) {
+  const [table, setTable] = useState<DatabaseTableKey>('relasi');
+  const [tableSearch, setTableSearch] = useState('');
+  const [query, setQuery] = useState('');
+  const [rows, setRows] = useState<DatabaseRow[]>([]);
+  const [selected, setSelected] = useState<DatabaseRow | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [sortKey, setSortKey] = useState('createdAt');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [page, setPage] = useState(0);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorForm, setEditorForm] = useState<RelasiForm>({ citizenId: '', firstName: '', lastName: '', dob: '', sex: '', nationality: '', relation: '', notes: '', robberyMissionCompleted: false, responsiblePerson: '', joinedAt: '', bloodOathDate: '', idCardUrl: '', bloodOathVideoUrl: '', active: true });
+  const [editorError, setEditorError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<DatabaseRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [recordEditorOpen, setRecordEditorOpen] = useState(false);
+  const [recordEditorForm, setRecordEditorForm] = useState<Record<string, string>>({});
+  const [recordEditorError, setRecordEditorError] = useState('');
+  const [recordSaving, setRecordSaving] = useState(false);
+  const isSuper = role === 'SUPER';
+  const pageSize = 20;
+  const visibleTables = DATABASE_TABLES.filter(item => (isSuper || item.id === 'relasi') && item.label.toLowerCase().includes(tableSearch.toLowerCase()));
+  const currentTable = DATABASE_TABLES.find(item => item.id === table)!;
+
+  const loadRows = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const endpoints: Record<DatabaseTableKey, string> = {
+        relasi: '/api/relasi',
+        requests: '/api/admin/requests',
+        reports: '/api/reports',
+        admins: '/api/admin/admins',
+        audit: '/api/admin/audit',
+        factions: '/api/factions',
+      };
+      const needsStaffHeader = table !== 'factions';
+      const response = await fetch(endpoints[table], { ...(needsStaffHeader ? { headers: staffHeaders(deviceId, false) } : {}), cache: 'no-store' });
+      if (!response.ok) throw new Error(await httpError(response));
+      const result = await response.json();
+      if (!Array.isArray(result)) throw new Error('Sumber data mengembalikan format yang tidak dikenal.');
+      const nextRows = result as DatabaseRow[];
+      setRows(nextRows);
+      setSelected(current => current ? nextRows.find(row => row.id === current.id) ?? null : null);
+    } catch (e: any) {
+      setRows([]);
+      setSelected(null);
+      setError(e?.message || 'Gagal memuat data tabel.');
+    } finally { setLoading(false); }
+  }, [table, deviceId]);
+
+  useEffect(() => { void loadRows(); }, [loadRows]);
+  useEffect(() => { setPage(0); setSelected(null); }, [table, query]);
+
+  const filteredRows = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const filtered = needle ? rows.filter(row => Object.values(row).some(value => String(value ?? '').toLowerCase().includes(needle))) : rows;
+    return [...filtered].sort((a, b) => {
+      const left = a[sortKey];
+      const right = b[sortKey];
+      const comparison = String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true, sensitivity: 'base' });
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  }, [rows, query, sortKey, sortDirection]);
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const pageRows = filteredRows.slice(page * pageSize, (page + 1) * pageSize);
+
+  const changeTable = (nextTable: DatabaseTableKey) => {
+    if (!isSuper && nextTable !== 'relasi') return;
+    setTable(nextTable);
+    setQuery('');
+    setPage(0);
+  };
+  const toggleSort = (key: string) => {
+    if (sortKey === key) setSortDirection(direction => direction === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDirection('asc'); }
+  };
+  const formatCell = (value: unknown) => {
+    if (value === null || value === undefined || value === '') return '—';
+    if (typeof value === 'boolean') return value ? 'Ya' : 'Tidak';
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
+  };
+  const makeEditorForm = (row?: DatabaseRow): RelasiForm => ({
+    ...(row?.id ? { id: String(row.id) } : {}),
+    citizenId: String(row?.citizenId ?? ''), firstName: String(row?.firstName ?? ''), lastName: String(row?.lastName ?? ''),
+    dob: String(row?.dob ?? ''), sex: String(row?.sex ?? ''), nationality: String(row?.nationality ?? ''), relation: String(row?.relation ?? ''), notes: String(row?.notes ?? ''),
+    robberyMissionCompleted: row?.robberyMissionCompleted === true, responsiblePerson: String(row?.responsiblePerson ?? ''), joinedAt: String(row?.joinedAt ?? ''), bloodOathDate: String(row?.bloodOathDate ?? ''),
+    idCardUrl: String(row?.idCardUrl ?? ''), bloodOathVideoUrl: String(row?.bloodOathVideoUrl ?? ''), active: row?.active !== false,
+  });
+  const canCreate = table === 'relasi' || (isSuper && (table === 'factions' || table === 'admins'));
+  const openRecordEditor = (row?: DatabaseRow) => {
+    setRecordEditorError('');
+    if (table === 'factions') setRecordEditorForm({ id: String(row?.id ?? ''), label: String(row?.label ?? ''), short: String(row?.short ?? ''), matchType: String(row?.matchType ?? 'STARTS_WITH'), side: String(row?.side ?? 'BAD'), color: String(row?.color ?? ''), badge: String(row?.badge ?? ''), dot: String(row?.dot ?? '') });
+    else if (table === 'admins') setRecordEditorForm({ name: '', deviceId: '', role: 'MOD' });
+    setRecordEditorOpen(true);
+  };
+  const saveRelasi = async () => {
+    setEditorError('');
+    if (!editorForm.firstName.trim() || !editorForm.lastName.trim()) { setEditorError('Nama depan dan nama belakang wajib diisi.'); return; }
+    if (!editorForm.id && (!editorForm.responsiblePerson.trim() || !editorForm.joinedAt)) { setEditorError('Penanggung jawab dan tanggal masuk wajib diisi.'); return; }
+    if (editorForm.bloodOathDate && !editorForm.robberyMissionCompleted) { setEditorError('Misi rampok harus ditandai selesai sebelum sumpah darah.'); return; }
+    setSaving(true);
+    try {
+      const response = await fetch('/api/relasi', { method: editorForm.id ? 'PUT' : 'POST', headers: staffHeaders(deviceId), body: JSON.stringify(withCitizenReference(editorForm)) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Gagal menyimpan relasi.');
+      setEditorOpen(false);
+      await loadRows();
+    } catch (e: any) { setEditorError(e?.message || 'Gagal menyimpan relasi.'); }
+    finally { setSaving(false); }
+  };
+  const uploadRelasiMedia = async (file: File, kind: 'id-card' | 'oath-video', onProgress: (percentage: number) => void) => {
+    setEditorError('');
+    if (file.size > 10 * 1024 * 1024) { onProgress(-1); setEditorError('Ukuran file maksimal 10 MB.'); return; }
+    setMediaBusy(true);
+    try {
+      const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '-').slice(-80) || 'upload';
+      const blob = await upload(`relasi-media/${kind}/${crypto.randomUUID()}-${safeName}`, file, { access: 'private', handleUploadUrl: '/api/relasi/upload', clientPayload: JSON.stringify({ deviceId, kind }), onUploadProgress: event => onProgress(event.percentage) });
+      setEditorForm(form => ({ ...form, [kind === 'id-card' ? 'idCardUrl' : 'bloodOathVideoUrl']: blob.pathname }));
+      onProgress(100);
+    } catch (e: any) { onProgress(-1); setEditorError(e?.message || 'Upload media gagal.'); }
+    finally { setMediaBusy(false); }
+  };
+  const removeRelasi = async () => {
+    if (!deleteTarget?.id) return;
+    setDeleting(true);
+    setError('');
+    try {
+      const deleteUrls: Partial<Record<DatabaseTableKey, string>> = { relasi: `/api/relasi?id=${encodeURIComponent(String(deleteTarget.id))}`, factions: `/api/factions?id=${encodeURIComponent(String(deleteTarget.id))}`, admins: `/api/admin/admins?id=${encodeURIComponent(String(deleteTarget.id))}` };
+      const response = await fetch(deleteUrls[table]!, { method: 'DELETE', headers: staffHeaders(deviceId, false) });
+      if (!response.ok) throw new Error(await httpError(response));
+      setDeleteTarget(null);
+      setSelected(null);
+      await loadRows();
+    } catch (e: any) { setError(e?.message || 'Gagal menghapus relasi.'); }
+    finally { setDeleting(false); }
+  };
+  const saveDatabaseRecord = async () => {
+    setRecordEditorError('');
+    if (table === 'admins' && (!recordEditorForm.name.trim() || !recordEditorForm.deviceId.trim())) { setRecordEditorError('Nama dan Device ID wajib diisi.'); return; }
+    if (table === 'factions' && (!recordEditorForm.label.trim() || !recordEditorForm.short.trim() || !recordEditorForm.matchType.trim())) { setRecordEditorError('Nama, alias, dan match type wajib diisi.'); return; }
+    setRecordSaving(true);
+    try {
+      const isFactionEdit = table === 'factions' && Boolean(recordEditorForm.id);
+      const payload = table === 'admins'
+        ? { name: recordEditorForm.name, deviceId: recordEditorForm.deviceId, role: recordEditorForm.role === 'SUPER' ? 'SUPER' : 'MOD' }
+        : { ...recordEditorForm, color: recordEditorForm.color || null };
+      const response = await fetch(table === 'admins' ? '/api/admin/admins' : '/api/factions', { method: isFactionEdit ? 'PUT' : 'POST', headers: staffHeaders(deviceId), body: JSON.stringify(payload) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Gagal menyimpan record.');
+      setRecordEditorOpen(false);
+      await loadRows();
+    } catch (e: any) { setRecordEditorError(e?.message || 'Gagal menyimpan record.'); }
+    finally { setRecordSaving(false); }
+  };
+  const runRecordAction = async (targetTable: 'requests' | 'reports', action: string) => {
+    if (!selected?.id) return;
+    setError('');
+    try {
+      const response = await fetch(targetTable === 'requests' ? '/api/admin/requests' : '/api/reports', { method: 'PATCH', headers: staffHeaders(deviceId), body: JSON.stringify({ id: selected.id, action }) });
+      if (!response.ok) throw new Error(await httpError(response));
+      await loadRows();
+    } catch (e: any) { setError(e?.message || 'Aksi gagal diproses.'); }
+  };
+  const skeletonRows = Array.from({ length: 7 }, (_, index) => index);
+
+  return (
+    <section className="mx-auto flex h-[calc(100dvh-150px)] min-h-[480px] max-w-[1500px] flex-col overflow-hidden rounded-xl border border-line bg-[#0b0b0c]" aria-label="Admin Database">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-card px-4 py-3">
+        <div className="min-w-0"><div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#c5a059]">Crimson Creed / Data Studio</div><div className="mt-1 flex items-center gap-2"><h2 className="text-sm font-semibold">Admin Database</h2><span className="rounded border border-line px-1.5 py-0.5 text-[9px] font-mono text-subtle">{isSuper ? 'SUPER' : 'MOD'}</span></div></div>
+        <div className="flex flex-wrap items-center gap-2"><button disabled title="Raw SQL belum tersedia tanpa dukungan backend" className="cursor-not-allowed rounded-md border border-line px-3 py-2 font-mono text-[11px] text-subtle opacity-60">SQL Editor · Belum tersedia</button>{isSuper && <button disabled title="Pengubahan schema belum tersedia" className="cursor-not-allowed rounded-md border border-line px-3 py-2 text-[11px] text-subtle opacity-60">Schema · Belum tersedia</button>}<button onClick={() => void loadRows()} disabled={loading} className="rounded-md border border-line px-3 py-2 text-[11px] text-muted transition-colors hover:border-line-hover disabled:opacity-50">{loading ? 'Memuat…' : 'Refresh'}</button></div>
+      </header>
+      <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[205px_minmax(0,1fr)_290px]">
+        <aside className="hidden min-h-0 flex-col border-r border-line bg-[#0e0e10] xl:flex">
+          <div className="border-b border-line p-3"><div className="mb-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-subtle">Tabel tersedia</div><input value={tableSearch} onChange={event => setTableSearch(event.target.value)} placeholder="Cari tabel" className="w-full rounded-md border border-line bg-app px-2.5 py-2 text-xs" /></div>
+          <nav className="flex-1 space-y-1 overflow-y-auto p-2">{visibleTables.map(item => <button key={item.id} onClick={() => changeTable(item.id)} className={`w-full rounded-md border px-2.5 py-2.5 text-left transition-colors ${table === item.id ? 'border-[#8b1e2d]/55 bg-[#8b1e2d]/10 text-main' : 'border-transparent text-muted hover:bg-hover'}`}><span className="block text-xs font-medium">{item.label}</span><span className="mt-1 block truncate text-[9px] text-subtle">{item.description}</span></button>)}</nav>
+          <div className="border-t border-line p-3 text-[9px] leading-relaxed text-subtle">Sumber: endpoint aplikasi yang tersedia. Tabel Auth dan schema internal tidak ditampilkan.</div>
+        </aside>
+        <main className="flex min-w-0 flex-col overflow-hidden">
+          <div className="flex flex-wrap items-center gap-2 border-b border-line bg-[#101012] p-3">
+            <select value={table} onChange={event => changeTable(event.target.value as DatabaseTableKey)} className="min-w-0 flex-1 rounded-md border border-line bg-app px-2.5 py-2 text-xs text-main xl:hidden">{DATABASE_TABLES.filter(item => isSuper || item.id === 'relasi').map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
+            <div className="hidden min-w-0 flex-1 xl:block"><div className="text-xs font-semibold">{currentTable.label}</div><div className="mt-0.5 text-[10px] text-subtle">{currentTable.description}</div></div>
+            <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Cari record…" className="min-w-[140px] flex-1 rounded-md border border-line bg-app px-3 py-2 text-xs sm:max-w-xs" />
+            <button onClick={() => { if (table === 'relasi') { setEditorForm(makeEditorForm()); setEditorError(''); setEditorOpen(true); } else openRecordEditor(); }} disabled={!canCreate} title={!canCreate ? 'Tambah record belum tersedia untuk tabel ini' : 'Tambah record'} className="rounded-md bg-accent px-3 py-2 text-xs font-semibold text-accent-text transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40">+ Add Record</button>
+          </div>
+          {error && <div className="border-b border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-400">{error}</div>}
+          <div className="min-h-0 flex-1 overflow-auto">
+            <table className="min-w-full border-collapse text-left text-xs">
+              <thead className="sticky top-0 z-10 bg-[#090909] text-[10px] uppercase tracking-wider text-[#c5a059]"><tr>{currentTable.columns.map(column => <th key={column.key} className="whitespace-nowrap border-b border-r border-line px-3 py-3 font-medium last:border-r-0"><button onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1.5 hover:text-[#e0c17f]">{column.label}<span className="text-[8px] text-subtle">{sortKey === column.key ? sortDirection === 'asc' ? '↑' : '↓' : '↕'}</span></button></th>)}</tr></thead>
+              <tbody>
+                {loading ? skeletonRows.map(index => <tr key={index}>{currentTable.columns.map(column => <td key={column.key} className="border-b border-r border-line/70 px-3 py-3 last:border-r-0"><div className="h-3 w-20 animate-pulse rounded bg-[#202023]" /></td>)}</tr>) : pageRows.map((row, index) => <tr key={String(row.id ?? index)} onClick={() => setSelected(row)} className={`cursor-pointer transition-colors hover:bg-[#191719] ${selected?.id === row.id ? 'bg-[#8b1e2d]/10' : ''}`}>{currentTable.columns.map(column => <td key={column.key} className={`max-w-[260px] truncate border-b border-r border-line/70 px-3 py-3 text-[#d8d5d5] last:border-r-0 ${column.mono ? 'font-mono text-[10px]' : ''}`} title={formatCell(row[column.key])}>{formatCell(row[column.key])}</td>)}</tr>)}
+                {!loading && pageRows.length === 0 && <tr><td colSpan={currentTable.columns.length} className="px-4 py-16 text-center"><div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-[#c5a059]/20 text-[#c5a059]"><span className="font-mono text-sm">∅</span></div><div className="text-sm text-muted">{error ? 'Data tidak dapat dimuat' : 'Tidak ada data di tabel ini'}</div>{canCreate && <button onClick={() => { if (table === 'relasi') { setEditorForm(makeEditorForm()); setEditorError(''); setEditorOpen(true); } else openRecordEditor(); }} className="mt-3 rounded-md border border-[#8b1e2d]/45 px-3 py-2 text-xs text-[#d9a1a8] transition-colors hover:bg-[#8b1e2d]/10">+ Tambah Data</button>}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <footer className="flex items-center justify-between gap-3 border-t border-line bg-[#101012] px-3 py-2 text-[10px] text-subtle"><span>{filteredRows.length ? `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, filteredRows.length)} dari ${filteredRows.length}` : '0 record'}</span><div className="flex items-center gap-2"><button onClick={() => setPage(current => Math.max(0, current - 1))} disabled={page === 0 || loading} className="rounded border border-line px-2 py-1 disabled:opacity-40">Sebelumnya</button><span className="font-mono">{page + 1}/{pageCount}</span><button onClick={() => setPage(current => Math.min(pageCount - 1, current + 1))} disabled={page + 1 >= pageCount || loading} className="rounded border border-line px-2 py-1 disabled:opacity-40">Berikutnya</button></div></footer>
+        </main>
+        <aside className="min-h-0 overflow-y-auto border-t border-line bg-[#0e0e10] p-4 xl:border-l xl:border-t-0">
+          <div className="flex items-center justify-between gap-2"><div><div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#c5a059]">Record detail</div><h3 className="mt-1 text-sm font-semibold">{selected ? formatCell(selected.firstName ? `${selected.firstName} ${selected.lastName ?? ''}` : selected.label ?? selected.name ?? selected.action ?? selected.id) : 'Pilih record'}</h3></div>{selected && table === 'relasi' && <button onClick={() => { setEditorForm(makeEditorForm(selected)); setEditorError(''); setEditorOpen(true); }} className="rounded-md border border-line px-2.5 py-1.5 text-[10px] text-muted hover:border-accent hover:text-main">Edit</button>}</div>
+          {!selected ? <div className="mt-5 rounded-lg border border-dashed border-line px-3 py-8 text-center text-xs text-subtle">Pilih baris untuk melihat detail.</div> : <div className="mt-4 space-y-2">{Object.entries(selected).map(([key, value]) => <div key={key} className="border-b border-line/70 pb-2"><div className="text-[9px] uppercase tracking-wider text-subtle">{key}</div><div className={`mt-1 break-all text-[11px] text-[#d8d5d5] ${key === 'id' || key.toLowerCase().includes('date') || key === 'deviceId' ? 'font-mono' : ''}`}>{formatCell(value)}</div></div>)}
+            {table === 'relasi' && <div className="flex flex-wrap gap-2 pt-2"><button onClick={() => { setEditorForm(makeEditorForm(selected)); setEditorError(''); setEditorOpen(true); }} className="rounded-md border border-line px-3 py-2 text-xs text-muted hover:border-accent hover:text-main">Edit</button>{isSuper && <button onClick={() => setDeleteTarget(selected)} className="rounded-md border border-red-900/60 px-3 py-2 text-xs text-red-300 transition-colors hover:bg-red-950/30">Hapus</button>}</div>}
+            {isSuper && table === 'factions' && <div className="flex flex-wrap gap-2 pt-2"><button onClick={() => openRecordEditor(selected)} className="rounded-md border border-line px-3 py-2 text-xs text-muted hover:border-accent hover:text-main">Edit faction</button><button onClick={() => setDeleteTarget(selected)} className="rounded-md border border-red-900/60 px-3 py-2 text-xs text-red-300 hover:bg-red-950/30">Hapus</button></div>}
+            {isSuper && table === 'admins' && <button onClick={() => setDeleteTarget(selected)} className="mt-2 rounded-md border border-red-900/60 px-3 py-2 text-xs text-red-300 hover:bg-red-950/30">Cabut akses staff</button>}
+            {isSuper && table === 'requests' && <div className="flex flex-wrap gap-2 pt-2"><button onClick={() => void runRecordAction('requests', 'APPROVE')} className="rounded-md border border-emerald-900/60 px-3 py-2 text-xs text-emerald-300">Approve</button><button onClick={() => void runRecordAction('requests', 'REVOKE')} className="rounded-md border border-line px-3 py-2 text-xs text-muted">Revoke</button><button onClick={() => void runRecordAction('requests', 'BAN')} className="rounded-md border border-red-900/60 px-3 py-2 text-xs text-red-300">Ban</button></div>}
+            {isSuper && table === 'reports' && selected.status !== 'RESOLVED' && <button onClick={() => void runRecordAction('reports', 'RESOLVE')} className="mt-2 rounded-md border border-emerald-900/60 px-3 py-2 text-xs text-emerald-300">Tandai selesai</button>}
+          </div>}
+          <div className="mt-6 border-t border-line pt-4"><div className="text-[9px] font-semibold uppercase tracking-wider text-subtle">Kemampuan aktif</div><p className="mt-2 text-[10px] leading-relaxed text-muted">{table === 'relasi' ? 'Create dan edit menggunakan alur Relasi yang tersedia.' : 'Tabel ini hanya ditampilkan baca-saja di Admin Database.'} {isSuper ? 'Raw SQL dan pengubahan schema belum tersedia.' : 'Aksi permanen dan SQL tidak tersedia untuk Moderator.'}</p></div>
+        </aside>
+      </div>
+      {editorOpen && <RelasiEditor open={editorOpen} form={editorForm} setForm={setEditorForm} saving={saving} mediaBusy={mediaBusy} error={editorError} onClose={() => setEditorOpen(false)} onSave={saveRelasi} onUpload={uploadRelasiMedia} />}
+      {recordEditorOpen && <div className="fixed inset-0 z-[125] flex items-center justify-center bg-black/70 p-4"><form onSubmit={event => { event.preventDefault(); void saveDatabaseRecord(); }} className="w-full max-w-lg space-y-4 rounded-xl border border-line bg-card p-5 shadow-2xl"><div><div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#c5a059]">{table === 'factions' ? 'Factions' : 'Admin Users'}</div><h2 className="mt-1 text-base font-semibold">{recordEditorForm.id ? 'Edit record' : 'Tambah record'}</h2></div>{table === 'factions' ? <div className="grid gap-3 sm:grid-cols-2"><label className="text-xs text-muted">Nama<input value={recordEditorForm.label ?? ''} onChange={event => setRecordEditorForm(form => ({ ...form, label: event.target.value }))} required className="mt-1 w-full rounded-md border border-line bg-app px-3 py-2 text-sm" /></label><label className="text-xs text-muted">Alias<input value={recordEditorForm.short ?? ''} onChange={event => setRecordEditorForm(form => ({ ...form, short: event.target.value }))} required className="mt-1 w-full rounded-md border border-line bg-app px-3 py-2 font-mono text-sm" /></label><label className="text-xs text-muted">Match type<select value={recordEditorForm.matchType ?? 'STARTS_WITH'} onChange={event => setRecordEditorForm(form => ({ ...form, matchType: event.target.value }))} className="mt-1 w-full rounded-md border border-line bg-app px-3 py-2 text-sm"><option>STARTS_WITH</option><option>INCLUDES</option><option>NONE</option></select></label><label className="text-xs text-muted">Side<select value={recordEditorForm.side ?? 'BAD'} onChange={event => setRecordEditorForm(form => ({ ...form, side: event.target.value }))} className="mt-1 w-full rounded-md border border-line bg-app px-3 py-2 text-sm"><option>BAD</option><option>GOOD</option><option>NONE</option></select></label><label className="text-xs text-muted sm:col-span-2">Badge class<input value={recordEditorForm.badge ?? ''} onChange={event => setRecordEditorForm(form => ({ ...form, badge: event.target.value }))} required className="mt-1 w-full rounded-md border border-line bg-app px-3 py-2 font-mono text-xs" /></label><label className="text-xs text-muted">Dot class<input value={recordEditorForm.dot ?? ''} onChange={event => setRecordEditorForm(form => ({ ...form, dot: event.target.value }))} required className="mt-1 w-full rounded-md border border-line bg-app px-3 py-2 font-mono text-xs" /></label><label className="text-xs text-muted">Color<input value={recordEditorForm.color ?? ''} onChange={event => setRecordEditorForm(form => ({ ...form, color: event.target.value }))} placeholder="Opsional" className="mt-1 w-full rounded-md border border-line bg-app px-3 py-2 font-mono text-xs" /></label></div> : <div className="space-y-3"><label className="block text-xs text-muted">Nama staff<input value={recordEditorForm.name ?? ''} onChange={event => setRecordEditorForm(form => ({ ...form, name: event.target.value }))} required maxLength={60} className="mt-1 w-full rounded-md border border-line bg-app px-3 py-2 text-sm" /></label><label className="block text-xs text-muted">Device ID<input value={recordEditorForm.deviceId ?? ''} onChange={event => setRecordEditorForm(form => ({ ...form, deviceId: event.target.value }))} required className="mt-1 w-full rounded-md border border-line bg-app px-3 py-2 font-mono text-xs" /></label><label className="block text-xs text-muted">Role<select value={recordEditorForm.role ?? 'MOD'} onChange={event => setRecordEditorForm(form => ({ ...form, role: event.target.value }))} className="mt-1 w-full rounded-md border border-line bg-app px-3 py-2 text-sm"><option value="MOD">Moderator</option><option value="SUPER">Super Admin</option></select></label></div>}{recordEditorError && <p className="text-xs text-red-400">{recordEditorError}</p>}<div className="flex gap-2"><button type="button" onClick={() => setRecordEditorOpen(false)} className="flex-1 rounded-md border border-line py-2 text-xs text-muted">Batal</button><button type="submit" disabled={recordSaving} className="flex-1 rounded-md bg-accent py-2 text-xs font-semibold text-accent-text disabled:opacity-50">{recordSaving ? 'Menyimpan…' : 'Simpan'}</button></div></form></div>}
+      {deleteTarget && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 p-4"><section role="alertdialog" aria-modal="true" aria-labelledby="database-delete-title" className="w-full max-w-sm rounded-xl border border-line bg-card p-5 shadow-2xl"><h2 id="database-delete-title" className="text-sm font-semibold">Konfirmasi penghapusan</h2><p className="mt-2 text-xs leading-relaxed text-muted">{table === 'relasi' ? `Data ${formatCell(deleteTarget.firstName)} ${formatCell(deleteTarget.lastName)} akan dihapus permanen.` : table === 'factions' ? `Faction ${formatCell(deleteTarget.label)} akan dihapus permanen.` : `Akses staff ${formatCell(deleteTarget.name)} akan dicabut.`}</p><div className="mt-5 flex gap-2"><button onClick={() => setDeleteTarget(null)} disabled={deleting} className="flex-1 rounded-md border border-line py-2 text-xs text-muted">Batal</button><button onClick={() => void removeRelasi()} disabled={deleting} className="flex-1 rounded-md bg-red-900/80 py-2 text-xs font-semibold text-white disabled:opacity-50">{deleting ? 'Memproses…' : 'Konfirmasi'}</button></div></section></div>}
+    </section>
   );
 }
 
