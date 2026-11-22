@@ -423,3 +423,124 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
     animation-iteration-count: 1 !important;
   }
 }
+
+/* Crimson Creed Relasi: restrained dark-luxury surface details */
+.relasi-display,
+.relasi-editor h2 {
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-weight: 600;
+}
+
+.relasi-stat {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-image: linear-gradient(112deg, color-mix(in srgb, var(--bg-card) 94%, #c5a059 6%), var(--bg-card) 52%);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+}
+.relasi-stat::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--stat-accent, #8b1e2d);
+  content: "";
+  opacity: 0.8;
+}
+.relasi-stat--crimson { --stat-accent: #8b1e2d; }
+.relasi-stat--gold { --stat-accent: #c5a059; }
+.relasi-stat--neutral { --stat-accent: #777174; }
+
+.relasi-tab-count {
+  display: inline-flex;
+  min-width: 1.35rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, #c5a059 28%, var(--border-line));
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, #c5a059 8%, transparent);
+  padding: 0 0.35rem;
+  color: #c5a059;
+  font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.relasi-card {
+  transform: translateY(0);
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+.relasi-card:hover {
+  border-color: color-mix(in srgb, #8b1e2d 52%, var(--border-line));
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.22);
+}
+.relasi-status--complete {
+  border-color: rgba(96, 155, 119, 0.28);
+  background: rgba(96, 155, 119, 0.07);
+  color: #a4c7ad;
+}
+.relasi-status--oath {
+  border-color: rgba(197, 160, 89, 0.35);
+  background: rgba(197, 160, 89, 0.08);
+  color: #c5a059;
+}
+.relasi-status--pending {
+  border-color: rgba(139, 30, 45, 0.38);
+  background: rgba(139, 30, 45, 0.08);
+  color: #d58b94;
+}
+
+.relasi-timeline {
+  border-color: color-mix(in srgb, #c5a059 38%, var(--border-line));
+}
+.relasi-timeline li {
+  border-left-color: color-mix(in srgb, #c5a059 38%, var(--border-line));
+}
+.relasi-timeline__dot {
+  box-shadow: 0 0 0 3px var(--bg-app);
+}
+
+.relasi-editor__header {
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.16);
+}
+.relasi-editor__footer {
+  box-shadow: 0 -8px 16px rgba(0, 0, 0, 0.18);
+}
+.relasi-editor__body input:not([type="checkbox"]),
+.relasi-editor__body textarea {
+  border-color: color-mix(in srgb, #c5a059 13%, var(--border-line));
+  background-color: color-mix(in srgb, var(--bg-app) 88%, #c5a059 12%);
+}
+.relasi-editor__body input:not([type="checkbox"]):focus,
+.relasi-editor__body textarea:focus {
+  border-color: #8b1e2d;
+  box-shadow: 0 0 0 1px rgba(139, 30, 45, 0.32);
+}
+.relasi-upload {
+  min-width: 0;
+}
+.relasi-upload__drop {
+  border-color: color-mix(in srgb, #c5a059 20%, var(--border-line));
+  background: linear-gradient(145deg, rgba(197, 160, 89, 0.035), transparent 68%);
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+.relasi-upload:hover .relasi-upload__drop,
+.relasi-upload:focus-within .relasi-upload__drop {
+  border-color: rgba(139, 30, 45, 0.62);
+  background-color: rgba(139, 30, 45, 0.045);
+}
+
+@media (max-width: 639px) {
+  .relasi-editor {
+    max-height: 96dvh;
+  }
+  .relasi-editor__body {
+    overscroll-behavior: contain;
+  }
+  .relasi-editor__footer button {
+    min-width: 0;
+    padding-inline: 0.65rem;
+    font-size: 0.8rem;
+  }
+}

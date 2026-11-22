@@ -925,12 +925,12 @@ function RelasiEditor({ open, form, setForm, saving, mediaBusy, error, onClose, 
   const setField = <K extends keyof RelasiForm>(key: K, value: RelasiForm[K]) => setForm(f => ({ ...f, [key]: value }));
   return (
     <div className="fixed inset-0 z-[110] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-      <div className="flex max-h-[94dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-line bg-card shadow-2xl sm:rounded-2xl">
-        <header className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-line bg-card px-5 py-4">
+      <div className="relasi-editor flex max-h-[94dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-line bg-card shadow-2xl sm:rounded-2xl">
+        <header className="relasi-editor__header sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-line bg-card px-5 py-4">
           <h2 className="font-bold">{form.id ? 'Edit Relasi' : 'Tambah Relasi'}</h2>
           <button onClick={onClose} className="rounded-lg bg-hover px-3 py-2 text-sm">Tutup</button>
         </header>
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
+        <div className="relasi-editor__body min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <input value={form.firstName} onChange={e => setField('firstName', e.target.value)} placeholder="Nama depan *" className="rounded-xl border border-line bg-app px-3 py-2.5 text-sm" />
             <input value={form.lastName} onChange={e => setField('lastName', e.target.value)} placeholder="Nama belakang *" className="rounded-xl border border-line bg-app px-3 py-2.5 text-sm" />
@@ -950,7 +950,7 @@ function RelasiEditor({ open, form, setForm, saving, mediaBusy, error, onClose, 
           </section>
           {error && <div className="rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-500">{error}</div>}
         </div>
-        <footer className="sticky bottom-0 z-10 flex shrink-0 gap-2 border-t border-line bg-card p-4" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}><button onClick={onClose} className="flex-1 rounded-xl bg-hover py-3 text-sm">Batal</button><button onClick={onSave} disabled={saving || mediaBusy} className="flex-1 rounded-xl bg-accent py-3 text-sm font-semibold text-accent-text disabled:opacity-50">{saving ? 'Menyimpan…' : mediaBusy ? 'Mengunggah…' : form.id ? 'Simpan Perubahan' : 'Tambah Relasi'}</button></footer>
+        <footer className="relasi-editor__footer sticky bottom-0 z-10 flex shrink-0 gap-2 border-t border-line bg-card p-4" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}><button onClick={onClose} className="flex-1 rounded-xl bg-hover py-3 text-sm">Batal</button><button onClick={onSave} disabled={saving || mediaBusy} className="flex-1 rounded-xl bg-accent py-3 text-sm font-semibold text-accent-text disabled:opacity-50">{saving ? 'Menyimpan…' : mediaBusy ? 'Mengunggah…' : form.id ? 'Simpan Perubahan' : 'Tambah Relasi'}</button></footer>
       </div>
     </div>
   );
@@ -972,11 +972,11 @@ function RelasiUploadField({ label, kind, accept, stored, disabled, onUpload }: 
   };
   const sizeLabel = file ? file.size < 1024 * 1024 ? `${(file.size / 1024).toFixed(0)} KB` : `${(file.size / (1024 * 1024)).toFixed(1)} MB` : '';
   return (
-    <div className={`rounded-lg border border-line bg-hover/60 p-3 transition-colors ${dragging ? 'border-accent bg-accent/5' : ''}`} onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); selectFile(event.dataTransfer.files[0]); }}>
+    <div className={`relasi-upload rounded-lg border border-line bg-hover/60 p-3 transition-colors ${dragging ? 'border-accent bg-accent/5' : ''}`} onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); selectFile(event.dataTransfer.files[0]); }}>
       <div className="mb-2 flex items-center justify-between gap-2"><span className="text-xs font-semibold">{label}</span><span className="text-[10px] text-subtle">{kind === 'oath-video' ? 'Maks. 10 MB' : 'Opsional'}</span></div>
-      {previewUrl && file ? <div className="mb-3 overflow-hidden rounded-md border border-line bg-app">{kind === 'id-card' ? <><div className="h-28 bg-center bg-contain bg-no-repeat" style={{ backgroundImage: `url("${previewUrl}")` }} /><span className="sr-only">Preview foto KTP</span></> : <video src={previewUrl} controls className="max-h-36 w-full bg-black object-contain" />}</div> : <div className="mb-3 flex h-20 items-center justify-center rounded-md border border-dashed border-line text-center text-[11px] text-subtle">{stored ? 'File tersimpan privat' : 'Tarik file ke sini atau pilih dari perangkat'}</div>}
+      {previewUrl && file ? <div className="mb-3 overflow-hidden rounded-md border border-line bg-app">{kind === 'id-card' ? <><div className="h-28 bg-center bg-contain bg-no-repeat" style={{ backgroundImage: `url("${previewUrl}")` }} /><span className="sr-only">Preview foto KTP</span></> : <video src={previewUrl} controls className="max-h-36 w-full bg-black object-contain" />}</div> : <div className="relasi-upload__drop mb-3 flex min-h-24 flex-col items-center justify-center rounded-md border border-dashed border-line px-3 py-4 text-center text-[11px] text-subtle"><svg className="mb-2 h-5 w-5 text-[#b99a5c]" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 15v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg><span>{stored ? 'File tersimpan privat' : 'Tarik & lepas file ke sini'}</span><span className="mt-1 text-[10px] text-subtle">atau pilih melalui tombol di bawah</span></div>}
       <input ref={inputRef} type="file" accept={accept} disabled={disabled} onChange={event => { selectFile(event.target.files?.[0]); event.target.value = ''; }} className="hidden" />
-      <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} className="w-full rounded-md border border-line px-3 py-2 text-left text-xs text-muted transition-colors hover:border-line-hover disabled:opacity-50">{file ? file.name : stored ? 'Ganti file' : 'Pilih file'}</button>
+      <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} className="w-full rounded-md border border-line px-3 py-2 text-left text-xs text-muted transition-colors hover:border-line-hover disabled:opacity-50">{file ? file.name : stored ? 'Klik untuk mengganti file' : 'Klik untuk memilih file'}</button>
       {file && <div className="mt-2"><div className="flex justify-between gap-2 text-[10px] text-subtle"><span className="truncate">{sizeLabel}</span><span>{progress < 0 ? 'Upload gagal' : progress >= 100 ? 'Selesai' : `${Math.round(progress)}%`}</span></div><div className="mt-1 h-1 overflow-hidden rounded-full bg-app"><div className="h-full rounded-full bg-accent transition-[width] duration-200" style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} /></div></div>}
     </div>
   );
@@ -1031,28 +1031,28 @@ function CompactRelasiPanel({ open, onClose, deviceId, items, onReload }: { open
   };
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col bg-app">
+    <div className="relasi-panel fixed inset-0 z-[100] flex flex-col bg-app">
       <header className="border-b border-line bg-card px-4 py-4" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
-          <div className="min-w-0"><div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#a58a55]">Crimson Creed</div><h1 className="mt-1 truncate text-lg font-bold">Relasi &amp; Sumpah Darah</h1><p className="text-[11px] text-muted">{items.length} catatan tersimpan</p></div>
+          <div className="min-w-0"><div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b99a5c]">Crimson Creed</div><h1 className="relasi-display mt-1 truncate text-lg font-bold">Relasi &amp; Sumpah Darah</h1><p className="text-[11px] text-muted">{items.length} catatan tersimpan</p></div>
           <div className="flex shrink-0 gap-2"><button onClick={() => { setForm(empty); setError(''); setEditor(true); }} className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-text transition-colors hover:bg-accent-hover sm:px-4">+ Tambah</button><button onClick={onClose} className="rounded-lg border border-line bg-hover px-3 py-2 text-sm transition-colors hover:border-line-hover">Tutup</button></div>
         </div>
       </header>
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         <div className="mx-auto max-w-5xl">
           <section className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3" aria-label="Statistik Relasi">
-            <div className="rounded-xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Total relasi</div><div className="mt-1 text-2xl font-semibold">{items.length}</div></div>
-            <div className="rounded-xl border border-[#a58a55]/20 bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-[#a58a55]">Sumpah darah</div><div className="mt-1 text-2xl font-semibold">{members.length}</div></div>
-            <div className="rounded-xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Aktif</div><div className="mt-1 text-2xl font-semibold">{items.filter(item => item.active).length}</div></div>
+            <div className="relasi-stat relasi-stat--crimson rounded-xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Total relasi</div><div className="mt-1 text-2xl font-semibold">{items.length}</div></div>
+            <div className="relasi-stat relasi-stat--gold rounded-xl border border-[#a58a55]/20 bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-[#b99a5c]">Sumpah darah</div><div className="mt-1 text-2xl font-semibold">{members.length}</div></div>
+            <div className="relasi-stat relasi-stat--neutral rounded-xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Aktif</div><div className="mt-1 text-2xl font-semibold">{items.filter(item => item.active).length}</div></div>
           </section>
           <div className="mb-5 flex border-b border-line" role="tablist" aria-label="Kategori relasi Crimson Creed">
-            <button type="button" role="tab" aria-selected={tab === 'relasi'} onClick={() => setTab('relasi')} className={`border-b-2 px-4 py-3 text-sm transition-colors ${tab === 'relasi' ? 'border-accent text-main' : 'border-transparent text-muted hover:text-main'}`}>Relasi <span className="ml-1 text-xs text-subtle">{relations.length}</span></button>
-            <button type="button" role="tab" aria-selected={tab === 'members'} onClick={() => setTab('members')} className={`border-b-2 px-4 py-3 text-sm transition-colors ${tab === 'members' ? 'border-accent text-main' : 'border-transparent text-muted hover:text-main'}`}>Sumpah Darah <span className="ml-1 text-xs text-subtle">{members.length}</span></button>
+            <button type="button" role="tab" aria-selected={tab === 'relasi'} onClick={() => setTab('relasi')} className={`border-b-2 px-4 py-3 text-sm transition-colors ${tab === 'relasi' ? 'border-accent text-main' : 'border-transparent text-muted hover:text-main'}`}>Relasi <span className="relasi-tab-count ml-1">{relations.length}</span></button>
+            <button type="button" role="tab" aria-selected={tab === 'members'} onClick={() => setTab('members')} className={`border-b-2 px-4 py-3 text-sm transition-colors ${tab === 'members' ? 'border-accent text-main' : 'border-transparent text-muted hover:text-main'}`}>Sumpah Darah <span className="relasi-tab-count ml-1">{members.length}</span></button>
           </div>
           <div className="grid gap-7 lg:grid-cols-[minmax(0,1fr)_240px]">
             <div className="min-w-0 space-y-3">
               {visibleItems.length === 0 ? <div className="rounded-xl border border-dashed border-line px-5 py-16 text-center"><div className="text-sm font-medium text-muted">{tab === 'members' ? 'Belum ada sumpah darah tercatat' : 'Belum ada relasi tersimpan'}</div><p className="mt-1 text-xs text-subtle">Data akan muncul di sini setelah dicatat.</p></div> : visibleItems.map(r => (
-                <article key={r.id} className="rounded-xl border border-line bg-card p-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)] transition duration-200 hover:-translate-y-0.5 hover:border-line-hover">
+                <article key={r.id} className="relasi-card rounded-xl border border-line bg-card p-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)] transition duration-200 hover:-translate-y-0.5 hover:border-line-hover">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
                       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#8B1E2D]/35 bg-[#8B1E2D]/15 text-xs font-semibold uppercase tracking-wider text-[#d99aa2]">{`${r.firstName.charAt(0)}${r.lastName.charAt(0)}`}</div>
@@ -1061,9 +1061,9 @@ function CompactRelasiPanel({ open, onClose, deviceId, items, onReload }: { open
                     <button aria-label={`Edit ${r.firstName} ${r.lastName}`} title="Edit relasi" onClick={() => { setForm({ id: r.id, citizenId: r.citizenId, firstName: r.firstName, lastName: r.lastName, dob: r.dob ?? '', sex: r.sex ?? '', nationality: r.nationality ?? '', relation: r.relation ?? '', notes: r.notes ?? '', robberyMissionCompleted: r.robberyMissionCompleted, responsiblePerson: r.responsiblePerson ?? '', joinedAt: r.joinedAt ?? '', bloodOathDate: r.bloodOathDate ?? '', idCardUrl: r.idCardUrl ?? '', bloodOathVideoUrl: r.bloodOathVideoUrl ?? '', active: r.active }); setError(''); setEditor(true); }} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line text-muted transition-colors hover:border-accent hover:text-accent"><svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" d="m14 5 5 5M4 20l4.2-.8L19 8.4a2.1 2.1 0 0 0-3-3L5.2 16.2 4 20Z" /></svg></button>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-1.5">
-                    <span className={`rounded-full border px-2 py-1 text-[10px] ${r.robberyMissionCompleted ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400' : 'border-line text-subtle'}`}>Misi {r.robberyMissionCompleted ? 'selesai' : 'belum'}</span>
-                    <span className={`rounded-full border px-2 py-1 text-[10px] ${r.bloodOathDate ? 'border-[#a58a55]/30 bg-[#a58a55]/10 text-[#c2a76e]' : 'border-line text-subtle'}`}>{r.bloodOathDate ? 'Sumpah darah' : 'Belum sumpah'}</span>
-                    {!r.active && <span className="rounded-full border border-line px-2 py-1 text-[10px] text-subtle">Nonaktif</span>}
+                    <span className={`relasi-status rounded-full border px-2 py-1 text-[10px] ${r.robberyMissionCompleted ? 'relasi-status--complete' : 'relasi-status--pending'}`}>Misi {r.robberyMissionCompleted ? 'selesai' : 'belum'}</span>
+                    <span className={`relasi-status rounded-full border px-2 py-1 text-[10px] ${r.bloodOathDate ? 'relasi-status--oath' : 'relasi-status--pending'}`}>{r.bloodOathDate ? 'Sumpah darah' : 'Belum sumpah'}</span>
+                    {!r.active && <span className="relasi-status rounded-full border border-line px-2 py-1 text-[10px] text-subtle">Nonaktif</span>}
                   </div>
                   <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-line pt-3 text-xs sm:grid-cols-4">
                     <div><span className="block text-[10px] uppercase tracking-wider text-subtle">Tanggal masuk</span><span className="mt-1 block">{r.joinedAt || '—'}</span></div>
@@ -1075,8 +1075,8 @@ function CompactRelasiPanel({ open, onClose, deviceId, items, onReload }: { open
               ))}
             </div>
             <aside className="border-t border-line pt-5 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
-              <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Aktivitas terbaru</h2>
-              {timeline.length === 0 ? <p className="mt-4 text-xs text-subtle">Belum ada aktivitas.</p> : <ol className="mt-4 space-y-4">{timeline.map(item => <li key={item.id} className="relative border-l border-line pl-4"><span className="absolute -left-[4px] top-1 h-2 w-2 rounded-full bg-[#a58a55]" /><div className="text-xs font-medium">{item.firstName} {item.lastName}</div><div className="mt-1 text-[10px] text-subtle">{item.bloodOathDate ? `Sumpah darah · ${item.bloodOathDate}` : 'Data relasi diperbarui'}</div><div className="mt-1 text-[10px] text-subtle">{new Date(item.updatedAt || item.createdAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</div></li>)}</ol>}
+              <h2 className="relasi-display text-xs font-semibold uppercase tracking-[0.16em] text-muted">Aktivitas terbaru</h2>
+              {timeline.length === 0 ? <p className="mt-4 text-xs text-subtle">Belum ada aktivitas.</p> : <ol className="relasi-timeline mt-4 space-y-4">{timeline.map(item => <li key={item.id} className="relative border-l border-line pl-4"><span className="relasi-timeline__dot absolute -left-[4px] top-1 h-2 w-2 rounded-full bg-[#b99a5c]" /><div className="text-xs font-medium">{item.firstName} {item.lastName}</div><div className="mt-1 text-[10px] text-subtle">{item.bloodOathDate ? `Sumpah darah · ${item.bloodOathDate}` : 'Data relasi diperbarui'}</div><div className="mt-1 text-[10px] text-subtle">{new Date(item.updatedAt || item.createdAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</div></li>)}</ol>}
             </aside>
           </div>
         </div>
