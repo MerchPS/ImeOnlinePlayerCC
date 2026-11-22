@@ -457,8 +457,25 @@ export default function App() {
         <main className="min-h-screen bg-app px-4 pb-16 pt-6 text-main sm:px-6">
           <div className="mx-auto max-w-5xl">
             <header className="mb-6 flex flex-col gap-4">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/ime-roleplay.gif" alt="IME Roleplay" className="h-28 w-full rounded-2xl border border-line object-cover sm:h-40" />
+              {viewMode === 'CC' ? (
+                <div className="flex items-center gap-4 rounded-2xl border border-[#8B1E2D]/30 bg-[linear-gradient(110deg,#111214_0%,#171012_58%,#111214_100%)] px-4 py-3 shadow-[0_12px_32px_rgba(0,0,0,0.22)]">
+                  <div className="flex h-[68px] w-[68px] shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[#8B1E2D]/25 bg-black/30 sm:h-20 sm:w-20">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/cc_rotate.gif" alt="Crimson Creed" className="h-full w-full object-contain" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#a58a55]">Crimson Creed</div>
+                    <div className="mt-1 text-sm text-muted">Blood, loyalty, and legacy.</div>
+                  </div>
+                  <div className="ml-auto hidden h-10 w-px bg-line sm:block" />
+                  <div className="hidden text-right sm:block"><div className="text-[10px] uppercase tracking-wider text-subtle">IME Roleplay</div><div className="mt-1 text-xs text-muted">Faction Monitor</div></div>
+                </div>
+              ) : (
+                <div className="flex h-[72px] w-full items-center justify-center overflow-hidden rounded-2xl border border-line bg-[#090909] sm:h-20">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/ime-roleplay.gif" alt="IME Roleplay" className="h-full w-full object-contain" />
+                </div>
+              )}
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-subtle">IME Roleplay</div>
@@ -921,10 +938,14 @@ function RelasiEditor({ open, form, setForm, saving, mediaBusy, error, onClose, 
 function CompactRelasiPanel({ open, onClose, deviceId, items, onReload }: { open: boolean; onClose: () => void; deviceId: string; items: Relasi[]; onReload: () => void }) {
   const empty: RelasiForm = { citizenId: '', firstName: '', lastName: '', dob: '', sex: '', nationality: '', relation: '', notes: '', robberyMissionCompleted: false, responsiblePerson: '', joinedAt: '', bloodOathDate: '', idCardUrl: '', bloodOathVideoUrl: '', active: true };
   const [editor, setEditor] = useState(false);
+  const [tab, setTab] = useState<'relasi' | 'members'>('relasi');
   const [form, setForm] = useState<RelasiForm>(empty);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [mediaBusy, setMediaBusy] = useState(false);
+  const members = items.filter(item => Boolean(item.bloodOathDate));
+  const relations = items.filter(item => !item.bloodOathDate);
+  const visibleItems = tab === 'members' ? members : relations;
 
   const uploadMedia = async (file: File, kind: 'id-card' | 'oath-video') => {
     setError('');
@@ -960,18 +981,34 @@ function CompactRelasiPanel({ open, onClose, deviceId, items, onReload }: { open
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-app">
-      <header className="flex items-center justify-between border-b border-line bg-card px-4 py-4" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
-        <div><h1 className="text-lg font-bold">Relasi Crimson Creed</h1><p className="text-[11px] text-muted">{items.length} data tersimpan</p></div>
-        <div className="flex gap-2"><button onClick={() => { setForm(empty); setError(''); setEditor(true); }} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-text">+ Tambah Relasi</button><button onClick={onClose} className="rounded-lg bg-hover px-4 py-2 text-sm">Tutup</button></div>
+      <header className="border-b border-line bg-card px-4 py-4" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
+          <div className="min-w-0"><div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#a58a55]">Crimson Creed</div><h1 className="mt-1 truncate text-lg font-bold">Relasi &amp; Sumpah Darah</h1><p className="text-[11px] text-muted">{items.length} catatan tersimpan</p></div>
+          <div className="flex shrink-0 gap-2"><button onClick={() => { setForm(empty); setError(''); setEditor(true); }} className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-text transition-colors hover:bg-accent-hover sm:px-4">+ Tambah</button><button onClick={onClose} className="rounded-lg border border-line bg-hover px-3 py-2 text-sm transition-colors hover:border-line-hover">Tutup</button></div>
+        </div>
       </header>
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-        <div className="mx-auto max-w-5xl space-y-3">
-          {items.length === 0 ? <div className="rounded-2xl border border-dashed border-line py-16 text-center text-sm text-subtle">Belum ada relasi.</div> : items.map(r => (
-            <div key={r.id} className="rounded-2xl border border-line bg-card p-4">
-              <div className="flex items-start justify-between gap-3"><div><div className="font-semibold">{r.firstName} {r.lastName}</div><div className="mt-1 font-mono text-[11px] text-subtle">{r.citizenId}</div></div><button onClick={() => { setForm({ id: r.id, citizenId: r.citizenId, firstName: r.firstName, lastName: r.lastName, dob: r.dob ?? '', sex: r.sex ?? '', nationality: r.nationality ?? '', relation: r.relation ?? '', notes: r.notes ?? '', robberyMissionCompleted: r.robberyMissionCompleted, responsiblePerson: r.responsiblePerson ?? '', joinedAt: r.joinedAt ?? '', bloodOathDate: r.bloodOathDate ?? '', idCardUrl: r.idCardUrl ?? '', bloodOathVideoUrl: r.bloodOathVideoUrl ?? '', active: r.active }); setError(''); setEditor(true); }} className="rounded-lg border border-line px-3 py-1.5 text-xs text-accent">Edit</button></div>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div><span className="text-subtle">Masuk:</span> {r.joinedAt || '—'}</div><div><span className="text-subtle">PJ:</span> {r.responsiblePerson || '—'}</div><div><span className="text-subtle">Misi rampok:</span> {r.robberyMissionCompleted ? 'Selesai' : 'Belum'}</div><div><span className="text-subtle">Sumpah:</span> {r.bloodOathDate || 'Belum'}</div></div>
-            </div>
-          ))}
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-5 flex border-b border-line" role="tablist" aria-label="Kategori relasi Crimson Creed">
+            <button type="button" role="tab" aria-selected={tab === 'relasi'} onClick={() => setTab('relasi')} className={`border-b-2 px-4 py-3 text-sm transition-colors ${tab === 'relasi' ? 'border-accent text-main' : 'border-transparent text-muted hover:text-main'}`}>Relasi <span className="ml-1 text-xs text-subtle">{relations.length}</span></button>
+            <button type="button" role="tab" aria-selected={tab === 'members'} onClick={() => setTab('members')} className={`border-b-2 px-4 py-3 text-sm transition-colors ${tab === 'members' ? 'border-accent text-main' : 'border-transparent text-muted hover:text-main'}`}>Sumpah Darah <span className="ml-1 text-xs text-subtle">{members.length}</span></button>
+          </div>
+          <div className="space-y-3">
+            {visibleItems.length === 0 ? <div className="rounded-xl border border-dashed border-line py-16 text-center text-sm text-subtle">{tab === 'members' ? 'Belum ada Member yang mencatat tanggal sumpah darah.' : 'Belum ada relasi.'}</div> : visibleItems.map(r => (
+              <div key={r.id} className="rounded-xl border border-line bg-card p-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)] transition-colors hover:border-line-hover">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><div className="font-semibold">{r.firstName} {r.lastName}</div>{tab === 'members' && <span className="rounded-full border border-[#a58a55]/30 bg-[#a58a55]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#c2a76e]">Member</span>}</div><div className="mt-1 font-mono text-[11px] text-subtle">{r.citizenId}</div></div>
+                  <button onClick={() => { setForm({ id: r.id, citizenId: r.citizenId, firstName: r.firstName, lastName: r.lastName, dob: r.dob ?? '', sex: r.sex ?? '', nationality: r.nationality ?? '', relation: r.relation ?? '', notes: r.notes ?? '', robberyMissionCompleted: r.robberyMissionCompleted, responsiblePerson: r.responsiblePerson ?? '', joinedAt: r.joinedAt ?? '', bloodOathDate: r.bloodOathDate ?? '', idCardUrl: r.idCardUrl ?? '', bloodOathVideoUrl: r.bloodOathVideoUrl ?? '', active: r.active }); setError(''); setEditor(true); }} className="rounded-lg border border-line px-3 py-1.5 text-xs text-accent transition-colors hover:border-accent">Edit</button>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-line pt-3 text-xs sm:grid-cols-4">
+                  <div><span className="block text-[10px] uppercase tracking-wider text-subtle">Tanggal masuk</span><span className="mt-1 block">{r.joinedAt || '—'}</span></div>
+                  <div><span className="block text-[10px] uppercase tracking-wider text-subtle">Penanggung jawab</span><span className="mt-1 block truncate">{r.responsiblePerson || '—'}</span></div>
+                  <div><span className="block text-[10px] uppercase tracking-wider text-subtle">Misi rampok</span><span className="mt-1 block">{r.robberyMissionCompleted ? 'Selesai' : 'Belum'}</span></div>
+                  <div><span className="block text-[10px] uppercase tracking-wider text-subtle">Tanggal sumpah darah</span><span className="mt-1 block font-medium text-[#c2a76e]">{r.bloodOathDate || 'Belum dicatat'}</span></div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
       {editor && <RelasiEditor open={editor} form={form} setForm={setForm} saving={saving} mediaBusy={mediaBusy} error={error} onClose={() => setEditor(false)} onSave={save} onUpload={uploadMedia} />}

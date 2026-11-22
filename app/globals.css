@@ -5,10 +5,11 @@
 @layer base {
   /* ══════════ THEMES ══════════ */
   :root, [data-theme="dark"] {
-    --bg-app: #0b0b0c; --bg-card: #141416; --bg-nav: rgba(20, 18, 19, 0.9); --bg-hover: #211a1b;
-    --text-main: #f2eeee; --text-muted: #a59da0; --text-subtle: #746b6e;
-    --border-line: #30282a; --border-line-hover: #49383b;
-    --accent: #d8434e; --accent-text: #ffffff; --accent-hover: #ed5963;
+    --bg-app: #090909; --bg-card: #111214; --bg-nav: rgba(17, 18, 20, 0.92); --bg-hover: #1b1b1e;
+    --text-main: #f3f1f1; --text-muted: #a6a1a2; --text-subtle: #777174;
+    --border-line: #29272a; --border-line-hover: #40373a;
+    --accent: #8b1e2d; --accent-text: #ffffff; --accent-hover: #a42a3c;
+    --accent-metal: #a58a55;
     color-scheme: dark;
   }
   [data-theme="light"] {
