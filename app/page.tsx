@@ -120,6 +120,9 @@ function browserNotify(title: string, body: string) {
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(title, { body });
   } catch { /* ignore */ }
 }
+function withCitizenReference<T extends { citizenId: string }>(record: T): T {
+  return { ...record, citizenId: record.citizenId.trim() || `AUTO${crypto.randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}` };
+}
 function stripThink(text: string) { return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim(); }
 
 function loadSettings(): Settings {
@@ -230,6 +233,7 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [dashboardError, setDashboardError] = useState('');
   const [dashboardLoading, setDashboardLoading] = useState(true);
+  const announcedHangarounds = useRef(new Set<string>());
 
   // State khusus moderator
   const [viewMode, setViewMode] = useState<'ALL' | 'CC'>('CC');
@@ -371,6 +375,21 @@ export default function App() {
     if (q) rows = rows.filter(p => p.name.toLowerCase().includes(q) || String(p.id).includes(q));
     return rows;
   }, [enriched, ccIds, viewMode, search]);
+  const ccOnline = useMemo(() => enriched.filter(player => ccIds.has(player.faction)).length, [enriched, ccIds]);
+  const unregisteredHangarounds = useMemo(() => enriched.filter(player => {
+    const hasHangaroundTag = /#HG\b/i.test(player.name);
+    return ccIds.has(player.faction) && hasHangaroundTag && !relasi.some(member => findRelasiPlayer(member, [player]));
+  }), [enriched, ccIds, relasi]);
+
+  useEffect(() => {
+    if (authStatus !== 'ADMIN') return;
+    for (const player of unregisteredHangarounds) {
+      const key = `${player.id}:${player.name.toLowerCase()}`;
+      if (announcedHangarounds.current.has(key)) continue;
+      announcedHangarounds.current.add(key);
+      browserNotify('Hangaround CC belum tercatat', `${player.name} (#${player.id}) belum ditemukan di data Relasi.`);
+    }
+  }, [authStatus, unregisteredHangarounds]);
 
   const openNewRelasi = () => {
     setRelasiError('');
@@ -380,8 +399,8 @@ export default function App() {
 
   const saveRelasi = async () => {
     setRelasiError('');
-    if (!relasiForm.firstName.trim() || !relasiForm.lastName.trim() || !relasiForm.citizenId.trim()) {
-      setRelasiError('Nama depan, nama belakang, dan Citizen ID wajib diisi.'); return;
+    if (!relasiForm.firstName.trim() || !relasiForm.lastName.trim()) {
+      setRelasiError('Nama depan dan nama belakang wajib diisi.'); return;
     }
     if (!relasiForm.id && (!relasiForm.responsiblePerson.trim() || !relasiForm.joinedAt)) {
       setRelasiError('Penanggung jawab dan tanggal masuk wajib diisi.'); return;
@@ -394,7 +413,7 @@ export default function App() {
       const res = await fetch('/api/relasi', {
         method: relasiForm.id ? 'PUT' : 'POST',
         headers: staffHeaders(deviceId),
-        body: JSON.stringify(relasiForm),
+        body: JSON.stringify(withCitizenReference(relasiForm)),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || 'Gagal menyimpan relasi');
@@ -407,9 +426,9 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [mediaBusy, setMediaBusy] = useState(false);
 
-  const uploadMedia = async (file: File, kind: 'id-card' | 'oath-video') => {
+  const uploadMedia = async (file: File, kind: 'id-card' | 'oath-video', onProgress: (percentage: number) => void = () => {}) => {
     setRelasiError('');
-    if (file.size > 10 * 1024 * 1024) { setRelasiError('Ukuran file maksimal 10 MB.'); return; }
+    if (file.size > 10 * 1024 * 1024) { onProgress(-1); setRelasiError('Ukuran file maksimal 10 MB.'); return; }
     setMediaBusy(true);
     try {
       const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '-').slice(-80) || 'upload';
@@ -417,9 +436,11 @@ export default function App() {
         access: 'private',
         handleUploadUrl: '/api/relasi/upload',
         clientPayload: JSON.stringify({ deviceId, kind }),
+        onUploadProgress: event => onProgress(event.percentage),
       });
       setRelasiForm(f => ({ ...f, [kind === 'id-card' ? 'idCardUrl' : 'bloodOathVideoUrl']: blob.pathname }));
-    } catch (e: any) { setRelasiError(e?.message || 'Upload media gagal'); }
+      onProgress(100);
+    } catch (e: any) { onProgress(-1); setRelasiError(e?.message || 'Upload media gagal'); }
     finally { setMediaBusy(false); }
   };
 
@@ -491,12 +512,13 @@ export default function App() {
               </div>
             </header>
             <section className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="rounded-2xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Online</div><div className="mt-1 text-2xl font-bold text-emerald-500">{data ? fmt(data.online) : '—'}</div></div>
+              <div className="rounded-2xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">CC Online</div><div className="mt-1 text-2xl font-bold text-emerald-500">{data ? fmt(ccOnline) : '—'}</div></div>
               <div className="rounded-2xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Max Slot</div><div className="mt-1 text-2xl font-bold">{data ? fmt(data.max) : '—'}</div></div>
               <div className="rounded-2xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Gate</div><div className="mt-1 truncate text-sm font-semibold">{data?.gate ?? '—'}</div></div>
               <div className="rounded-2xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Faction</div><div className="mt-1 text-2xl font-bold text-accent">{factions.length}</div></div>
             </section>
             {dashboardError && <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">{dashboardError}</div>}
+            {authStatus === 'ADMIN' && unregisteredHangarounds.length > 0 && <section className="mb-4 rounded-xl border border-[#8B1E2D]/35 bg-[#8B1E2D]/10 p-4" role="status"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="text-sm font-semibold text-main">Hangaround Crimson Creed belum tercatat</div><p className="mt-1 text-xs text-muted">{unregisteredHangarounds.length} player bertag #HG tidak cocok dengan data Relasi.</p></div><div className="flex gap-2">{typeof Notification !== 'undefined' && Notification.permission === 'default' && <button onClick={() => { Notification.requestPermission().then(permission => { if (permission === 'granted' && unregisteredHangarounds[0]) browserNotify('Hangaround CC belum tercatat', `${unregisteredHangarounds[0].name} (#${unregisteredHangarounds[0].id}) belum ditemukan di data Relasi.`); }); }} className="rounded-lg border border-line px-3 py-2 text-xs font-medium text-muted transition-colors hover:border-line-hover">Aktifkan notifikasi</button>}<button onClick={() => setRelasiOpen(true)} className="rounded-lg border border-[#8B1E2D]/40 px-3 py-2 text-xs font-semibold text-[#d98a94] transition-colors hover:bg-[#8B1E2D]/15">Periksa Relasi</button></div></div><div className="mt-3 flex flex-wrap gap-2">{unregisteredHangarounds.slice(0, 8).map(player => <span key={`${player.id}-${player.name}`} className="rounded-md border border-line bg-app/70 px-2.5 py-1.5 text-xs"><span className="font-medium">{player.name}</span><span className="ml-2 font-mono text-subtle">#{player.id}</span></span>)}</div></section>}
             <section className="mb-4 flex gap-3">
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari nama atau kantong…" className="min-w-0 flex-1 rounded-xl border border-line bg-card px-4 py-2.5 text-sm outline-none focus:border-accent" />
               <button onClick={loadDashboard} disabled={dashboardLoading} className="rounded-xl border border-line bg-card px-4 py-2.5 text-sm disabled:opacity-40">{dashboardLoading ? 'Memuat…' : 'Refresh'}</button>
@@ -534,7 +556,7 @@ export default function App() {
 
       {settingsOpen && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-line bg-card p-5"><h2 className="text-lg font-bold">Pengaturan</h2><div className="mt-4 space-y-3"><label className="block text-xs text-muted">Tema<select value={settings.theme} onChange={e => setSettings(s => ({ ...s, theme: e.target.value as Theme }))} className="mt-1 w-full rounded-xl border border-line bg-app px-3 py-2.5 text-sm text-main"><option value="dark">Dark</option><option value="light">Light</option><option value="glass">Glass</option><option value="cyberpunk">Cyberpunk</option><option value="nord">Nord</option></select></label><label className="block text-xs text-muted">Auto refresh<select value={settings.refreshMs} onChange={e => setSettings(s => ({ ...s, refreshMs: Number(e.target.value) }))} className="mt-1 w-full rounded-xl border border-line bg-app px-3 py-2.5 text-sm text-main"><option value={30000}>30 detik</option><option value={60000}>60 detik</option><option value={120000}>2 menit</option></select></label><div className="rounded-xl border border-line p-3"><div className="text-[10px] text-subtle">Device ID</div><div className="mt-1 break-all font-mono text-xs">{deviceId}</div></div></div><div className="mt-5 flex gap-2"><button onClick={() => setSettingsOpen(false)} className="flex-1 rounded-xl bg-hover py-2.5 text-sm">Batal</button><button onClick={() => { handleSaveSettings(settings); setSettingsOpen(false); }} className="flex-1 rounded-xl bg-accent py-2.5 text-sm font-semibold text-accent-text">Simpan</button></div></div>
+          <div className="w-full max-w-md rounded-2xl border border-line bg-card p-5"><h2 className="text-lg font-bold">Pengaturan</h2><div className="mt-4 space-y-3"><label className="block text-xs text-muted">Tema<select value={settings.theme} onChange={e => setSettings(s => ({ ...s, theme: e.target.value as Theme }))} className="mt-1 w-full rounded-xl border border-line bg-app px-3 py-2.5 text-sm text-main"><option value="dark">Dark</option><option value="light">Light</option><option value="glass">Glass</option><option value="cyberpunk">Cyberpunk</option><option value="nord">Nord</option></select></label><label className="block text-xs text-muted">Auto refresh<select value={settings.refreshMs} onChange={e => setSettings(s => ({ ...s, refreshMs: Number(e.target.value) }))} className="mt-1 w-full rounded-xl border border-line bg-app px-3 py-2.5 text-sm text-main"><option value={30000}>30 detik</option><option value={60000}>60 detik</option><option value={120000}>2 menit</option></select></label><div className="flex items-center justify-between gap-3 rounded-xl border border-line p-3"><div className="min-w-0"><div className="text-[10px] text-subtle">Device ID</div><div className="mt-1 break-all font-mono text-xs">{deviceId}</div></div><CopyButton value={deviceId} /></div></div><div className="mt-5 flex gap-2"><button onClick={() => setSettingsOpen(false)} className="flex-1 rounded-xl bg-hover py-2.5 text-sm">Batal</button><button onClick={() => { handleSaveSettings(settings); setSettingsOpen(false); }} className="flex-1 rounded-xl bg-accent py-2.5 text-sm font-semibold text-accent-text">Simpan</button></div></div>
         </div>
       )}
 
@@ -897,22 +919,22 @@ function RelasiEditor({ open, form, setForm, saving, mediaBusy, error, onClose, 
   error: string;
   onClose: () => void;
   onSave: () => void;
-  onUpload: (file: File, kind: 'id-card' | 'oath-video') => void;
+  onUpload: (file: File, kind: 'id-card' | 'oath-video', onProgress: (percentage: number) => void) => void;
 }) {
   if (!open) return null;
   const setField = <K extends keyof RelasiForm>(key: K, value: RelasiForm[K]) => setForm(f => ({ ...f, [key]: value }));
   return (
-    <div className="fixed inset-0 z-[110] flex items-end justify-center bg-black/60 sm:items-center sm:p-4">
-      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-line bg-card sm:rounded-2xl">
-        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-card px-5 py-4">
+    <div className="fixed inset-0 z-[110] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+      <div className="flex max-h-[94dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-line bg-card shadow-2xl sm:rounded-2xl">
+        <header className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-line bg-card px-5 py-4">
           <h2 className="font-bold">{form.id ? 'Edit Relasi' : 'Tambah Relasi'}</h2>
           <button onClick={onClose} className="rounded-lg bg-hover px-3 py-2 text-sm">Tutup</button>
         </header>
-        <div className="space-y-3 p-5">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <input value={form.firstName} onChange={e => setField('firstName', e.target.value)} placeholder="Nama depan *" className="rounded-xl border border-line bg-app px-3 py-2.5 text-sm" />
             <input value={form.lastName} onChange={e => setField('lastName', e.target.value)} placeholder="Nama belakang *" className="rounded-xl border border-line bg-app px-3 py-2.5 text-sm" />
-            <input value={form.citizenId} onChange={e => setField('citizenId', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} maxLength={16} placeholder="Citizen ID *" className="rounded-xl border border-line bg-app px-3 py-2.5 font-mono text-sm sm:col-span-2" />
+            <label className="text-[11px] text-muted sm:col-span-2">Citizen ID <span className="text-subtle">(opsional)</span><input value={form.citizenId} onChange={e => setField('citizenId', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} maxLength={16} placeholder="Boleh dikosongkan" className="mt-1 w-full rounded-xl border border-line bg-app px-3 py-2.5 font-mono text-sm" /></label>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <input value={form.responsiblePerson} onChange={e => setField('responsiblePerson', e.target.value)} placeholder="Penanggung jawab *" className="rounded-xl border border-line bg-app px-3 py-2.5 text-sm" />
@@ -923,13 +945,39 @@ function RelasiEditor({ open, form, setForm, saving, mediaBusy, error, onClose, 
           <input value={form.relation} onChange={e => setField('relation', e.target.value)} placeholder="Hubungan / keterangan" className="w-full rounded-xl border border-line bg-app px-3 py-2.5 text-sm" />
           <textarea value={form.notes} onChange={e => setField('notes', e.target.value)} rows={3} placeholder="Catatan" className="w-full resize-none rounded-xl border border-line bg-app px-3 py-2.5 text-sm" />
           <section className="grid grid-cols-1 gap-3 rounded-xl border border-line p-3 sm:grid-cols-2">
-            <label className="block rounded-xl bg-hover p-3"><span className="block text-xs font-semibold">Foto KTP <span className="text-subtle">(opsional)</span></span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={mediaBusy} onChange={e => { const file = e.target.files?.[0]; if (file) onUpload(file, 'id-card'); e.target.value = ''; }} className="mt-2 block w-full text-xs" /><span className="mt-1 block text-[10px] text-muted">{form.idCardUrl ? 'Foto tersimpan privat' : 'Belum ada foto'}</span></label>
-            <label className="block rounded-xl bg-hover p-3"><span className="block text-xs font-semibold">Video sumpah darah <span className="text-subtle">(maks. 10 MB)</span></span><input type="file" accept="video/mp4,video/webm,video/quicktime" disabled={mediaBusy || !form.robberyMissionCompleted} onChange={e => { const file = e.target.files?.[0]; if (file) onUpload(file, 'oath-video'); e.target.value = ''; }} className="mt-2 block w-full text-xs disabled:opacity-50" /><span className="mt-1 block text-[10px] text-muted">{form.bloodOathVideoUrl ? 'Video tersimpan privat' : 'Belum ada video'}</span></label>
+            <RelasiUploadField label="Foto KTP" kind="id-card" accept="image/jpeg,image/png,image/webp" stored={Boolean(form.idCardUrl)} disabled={mediaBusy} onUpload={onUpload} />
+            <RelasiUploadField label="Video sumpah darah" kind="oath-video" accept="video/mp4,video/webm,video/quicktime" stored={Boolean(form.bloodOathVideoUrl)} disabled={mediaBusy || !form.robberyMissionCompleted} onUpload={onUpload} />
           </section>
           {error && <div className="rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-500">{error}</div>}
-          <div className="flex gap-2"><button onClick={onClose} className="flex-1 rounded-xl bg-hover py-3 text-sm">Batal</button><button onClick={onSave} disabled={saving || mediaBusy} className="flex-1 rounded-xl bg-accent py-3 text-sm font-semibold text-accent-text disabled:opacity-50">{saving ? 'Menyimpan…' : mediaBusy ? 'Mengunggah…' : form.id ? 'Simpan Perubahan' : 'Tambah Relasi'}</button></div>
         </div>
+        <footer className="sticky bottom-0 z-10 flex shrink-0 gap-2 border-t border-line bg-card p-4" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}><button onClick={onClose} className="flex-1 rounded-xl bg-hover py-3 text-sm">Batal</button><button onClick={onSave} disabled={saving || mediaBusy} className="flex-1 rounded-xl bg-accent py-3 text-sm font-semibold text-accent-text disabled:opacity-50">{saving ? 'Menyimpan…' : mediaBusy ? 'Mengunggah…' : form.id ? 'Simpan Perubahan' : 'Tambah Relasi'}</button></footer>
       </div>
+    </div>
+  );
+}
+
+function RelasiUploadField({ label, kind, accept, stored, disabled, onUpload }: { label: string; kind: 'id-card' | 'oath-video'; accept: string; stored: boolean; disabled: boolean; onUpload: (file: File, kind: 'id-card' | 'oath-video', onProgress: (percentage: number) => void) => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [progress, setProgress] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+  const selectFile = (selected: File | undefined) => {
+    if (!selected) return;
+    setFile(selected);
+    setPreviewUrl(URL.createObjectURL(selected));
+    setProgress(0);
+    onUpload(selected, kind, setProgress);
+  };
+  const sizeLabel = file ? file.size < 1024 * 1024 ? `${(file.size / 1024).toFixed(0)} KB` : `${(file.size / (1024 * 1024)).toFixed(1)} MB` : '';
+  return (
+    <div className={`rounded-lg border border-line bg-hover/60 p-3 transition-colors ${dragging ? 'border-accent bg-accent/5' : ''}`} onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); selectFile(event.dataTransfer.files[0]); }}>
+      <div className="mb-2 flex items-center justify-between gap-2"><span className="text-xs font-semibold">{label}</span><span className="text-[10px] text-subtle">{kind === 'oath-video' ? 'Maks. 10 MB' : 'Opsional'}</span></div>
+      {previewUrl && file ? <div className="mb-3 overflow-hidden rounded-md border border-line bg-app">{kind === 'id-card' ? <><div className="h-28 bg-center bg-contain bg-no-repeat" style={{ backgroundImage: `url("${previewUrl}")` }} /><span className="sr-only">Preview foto KTP</span></> : <video src={previewUrl} controls className="max-h-36 w-full bg-black object-contain" />}</div> : <div className="mb-3 flex h-20 items-center justify-center rounded-md border border-dashed border-line text-center text-[11px] text-subtle">{stored ? 'File tersimpan privat' : 'Tarik file ke sini atau pilih dari perangkat'}</div>}
+      <input ref={inputRef} type="file" accept={accept} disabled={disabled} onChange={event => { selectFile(event.target.files?.[0]); event.target.value = ''; }} className="hidden" />
+      <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} className="w-full rounded-md border border-line px-3 py-2 text-left text-xs text-muted transition-colors hover:border-line-hover disabled:opacity-50">{file ? file.name : stored ? 'Ganti file' : 'Pilih file'}</button>
+      {file && <div className="mt-2"><div className="flex justify-between gap-2 text-[10px] text-subtle"><span className="truncate">{sizeLabel}</span><span>{progress < 0 ? 'Upload gagal' : progress >= 100 ? 'Selesai' : `${Math.round(progress)}%`}</span></div><div className="mt-1 h-1 overflow-hidden rounded-full bg-app"><div className="h-full rounded-full bg-accent transition-[width] duration-200" style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} /></div></div>}
     </div>
   );
 }
@@ -946,10 +994,11 @@ function CompactRelasiPanel({ open, onClose, deviceId, items, onReload }: { open
   const members = items.filter(item => Boolean(item.bloodOathDate));
   const relations = items.filter(item => !item.bloodOathDate);
   const visibleItems = tab === 'members' ? members : relations;
+  const timeline = [...items].sort((a, b) => Date.parse(b.updatedAt || b.createdAt) - Date.parse(a.updatedAt || a.createdAt)).slice(0, 5);
 
-  const uploadMedia = async (file: File, kind: 'id-card' | 'oath-video') => {
+  const uploadMedia = async (file: File, kind: 'id-card' | 'oath-video', onProgress: (percentage: number) => void = () => {}) => {
     setError('');
-    if (file.size > 10 * 1024 * 1024) { setError('Ukuran file maksimal 10 MB.'); return; }
+    if (file.size > 10 * 1024 * 1024) { onProgress(-1); setError('Ukuran file maksimal 10 MB.'); return; }
     setMediaBusy(true);
     try {
       const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '-').slice(-80) || 'upload';
@@ -957,21 +1006,23 @@ function CompactRelasiPanel({ open, onClose, deviceId, items, onReload }: { open
         access: 'private',
         handleUploadUrl: '/api/relasi/upload',
         clientPayload: JSON.stringify({ deviceId, kind }),
+        onUploadProgress: event => onProgress(event.percentage),
       });
       setForm(f => ({ ...f, [kind === 'id-card' ? 'idCardUrl' : 'bloodOathVideoUrl']: blob.pathname }));
-    } catch (e: any) { setError(e?.message || 'Upload media gagal'); }
+      onProgress(100);
+    } catch (e: any) { onProgress(-1); setError(e?.message || 'Upload media gagal'); }
     finally { setMediaBusy(false); }
   };
 
   const setField = <K extends keyof RelasiForm>(key: K, value: RelasiForm[K]) => setForm(f => ({ ...f, [key]: value }));
   const save = async () => {
     setError('');
-    if (!form.firstName.trim() || !form.lastName.trim() || !form.citizenId.trim()) { setError('Nama depan, nama belakang, dan Citizen ID wajib diisi.'); return; }
+    if (!form.firstName.trim() || !form.lastName.trim()) { setError('Nama depan dan nama belakang wajib diisi.'); return; }
     if (!form.id && (!form.responsiblePerson.trim() || !form.joinedAt)) { setError('Penanggung jawab dan tanggal masuk wajib diisi.'); return; }
     if (form.bloodOathDate && !form.robberyMissionCompleted) { setError('Misi rampok harus ditandai selesai sebelum sumpah darah.'); return; }
     setSaving(true);
     try {
-      const res = await fetch('/api/relasi', { method: form.id ? 'PUT' : 'POST', headers: staffHeaders(deviceId), body: JSON.stringify(form) });
+      const res = await fetch('/api/relasi', { method: form.id ? 'PUT' : 'POST', headers: staffHeaders(deviceId), body: JSON.stringify(withCitizenReference(form)) });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || 'Gagal menyimpan relasi');
       setEditor(false); onReload();
@@ -989,25 +1040,44 @@ function CompactRelasiPanel({ open, onClose, deviceId, items, onReload }: { open
       </header>
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         <div className="mx-auto max-w-5xl">
+          <section className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3" aria-label="Statistik Relasi">
+            <div className="rounded-xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Total relasi</div><div className="mt-1 text-2xl font-semibold">{items.length}</div></div>
+            <div className="rounded-xl border border-[#a58a55]/20 bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-[#a58a55]">Sumpah darah</div><div className="mt-1 text-2xl font-semibold">{members.length}</div></div>
+            <div className="rounded-xl border border-line bg-card p-4"><div className="text-[10px] font-semibold uppercase tracking-wider text-subtle">Aktif</div><div className="mt-1 text-2xl font-semibold">{items.filter(item => item.active).length}</div></div>
+          </section>
           <div className="mb-5 flex border-b border-line" role="tablist" aria-label="Kategori relasi Crimson Creed">
             <button type="button" role="tab" aria-selected={tab === 'relasi'} onClick={() => setTab('relasi')} className={`border-b-2 px-4 py-3 text-sm transition-colors ${tab === 'relasi' ? 'border-accent text-main' : 'border-transparent text-muted hover:text-main'}`}>Relasi <span className="ml-1 text-xs text-subtle">{relations.length}</span></button>
             <button type="button" role="tab" aria-selected={tab === 'members'} onClick={() => setTab('members')} className={`border-b-2 px-4 py-3 text-sm transition-colors ${tab === 'members' ? 'border-accent text-main' : 'border-transparent text-muted hover:text-main'}`}>Sumpah Darah <span className="ml-1 text-xs text-subtle">{members.length}</span></button>
           </div>
-          <div className="space-y-3">
-            {visibleItems.length === 0 ? <div className="rounded-xl border border-dashed border-line py-16 text-center text-sm text-subtle">{tab === 'members' ? 'Belum ada Member yang mencatat tanggal sumpah darah.' : 'Belum ada relasi.'}</div> : visibleItems.map(r => (
-              <div key={r.id} className="rounded-xl border border-line bg-card p-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)] transition-colors hover:border-line-hover">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><div className="font-semibold">{r.firstName} {r.lastName}</div>{tab === 'members' && <span className="rounded-full border border-[#a58a55]/30 bg-[#a58a55]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#c2a76e]">Member</span>}</div><div className="mt-1 font-mono text-[11px] text-subtle">{r.citizenId}</div></div>
-                  <button onClick={() => { setForm({ id: r.id, citizenId: r.citizenId, firstName: r.firstName, lastName: r.lastName, dob: r.dob ?? '', sex: r.sex ?? '', nationality: r.nationality ?? '', relation: r.relation ?? '', notes: r.notes ?? '', robberyMissionCompleted: r.robberyMissionCompleted, responsiblePerson: r.responsiblePerson ?? '', joinedAt: r.joinedAt ?? '', bloodOathDate: r.bloodOathDate ?? '', idCardUrl: r.idCardUrl ?? '', bloodOathVideoUrl: r.bloodOathVideoUrl ?? '', active: r.active }); setError(''); setEditor(true); }} className="rounded-lg border border-line px-3 py-1.5 text-xs text-accent transition-colors hover:border-accent">Edit</button>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-line pt-3 text-xs sm:grid-cols-4">
-                  <div><span className="block text-[10px] uppercase tracking-wider text-subtle">Tanggal masuk</span><span className="mt-1 block">{r.joinedAt || '—'}</span></div>
-                  <div><span className="block text-[10px] uppercase tracking-wider text-subtle">Penanggung jawab</span><span className="mt-1 block truncate">{r.responsiblePerson || '—'}</span></div>
-                  <div><span className="block text-[10px] uppercase tracking-wider text-subtle">Misi rampok</span><span className="mt-1 block">{r.robberyMissionCompleted ? 'Selesai' : 'Belum'}</span></div>
-                  <div><span className="block text-[10px] uppercase tracking-wider text-subtle">Tanggal sumpah darah</span><span className="mt-1 block font-medium text-[#c2a76e]">{r.bloodOathDate || 'Belum dicatat'}</span></div>
-                </div>
-              </div>
-            ))}
+          <div className="grid gap-7 lg:grid-cols-[minmax(0,1fr)_240px]">
+            <div className="min-w-0 space-y-3">
+              {visibleItems.length === 0 ? <div className="rounded-xl border border-dashed border-line px-5 py-16 text-center"><div className="text-sm font-medium text-muted">{tab === 'members' ? 'Belum ada sumpah darah tercatat' : 'Belum ada relasi tersimpan'}</div><p className="mt-1 text-xs text-subtle">Data akan muncul di sini setelah dicatat.</p></div> : visibleItems.map(r => (
+                <article key={r.id} className="rounded-xl border border-line bg-card p-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)] transition duration-200 hover:-translate-y-0.5 hover:border-line-hover">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#8B1E2D]/35 bg-[#8B1E2D]/15 text-xs font-semibold uppercase tracking-wider text-[#d99aa2]">{`${r.firstName.charAt(0)}${r.lastName.charAt(0)}`}</div>
+                      <div className="min-w-0"><div className="truncate font-semibold">{r.firstName} {r.lastName}</div><div className="mt-1 truncate font-mono text-[11px] text-subtle">{r.citizenId.startsWith('AUTO') ? 'Citizen ID tidak dicatat' : r.citizenId}</div></div>
+                    </div>
+                    <button aria-label={`Edit ${r.firstName} ${r.lastName}`} title="Edit relasi" onClick={() => { setForm({ id: r.id, citizenId: r.citizenId, firstName: r.firstName, lastName: r.lastName, dob: r.dob ?? '', sex: r.sex ?? '', nationality: r.nationality ?? '', relation: r.relation ?? '', notes: r.notes ?? '', robberyMissionCompleted: r.robberyMissionCompleted, responsiblePerson: r.responsiblePerson ?? '', joinedAt: r.joinedAt ?? '', bloodOathDate: r.bloodOathDate ?? '', idCardUrl: r.idCardUrl ?? '', bloodOathVideoUrl: r.bloodOathVideoUrl ?? '', active: r.active }); setError(''); setEditor(true); }} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line text-muted transition-colors hover:border-accent hover:text-accent"><svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" d="m14 5 5 5M4 20l4.2-.8L19 8.4a2.1 2.1 0 0 0-3-3L5.2 16.2 4 20Z" /></svg></button>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    <span className={`rounded-full border px-2 py-1 text-[10px] ${r.robberyMissionCompleted ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400' : 'border-line text-subtle'}`}>Misi {r.robberyMissionCompleted ? 'selesai' : 'belum'}</span>
+                    <span className={`rounded-full border px-2 py-1 text-[10px] ${r.bloodOathDate ? 'border-[#a58a55]/30 bg-[#a58a55]/10 text-[#c2a76e]' : 'border-line text-subtle'}`}>{r.bloodOathDate ? 'Sumpah darah' : 'Belum sumpah'}</span>
+                    {!r.active && <span className="rounded-full border border-line px-2 py-1 text-[10px] text-subtle">Nonaktif</span>}
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-line pt-3 text-xs sm:grid-cols-4">
+                    <div><span className="block text-[10px] uppercase tracking-wider text-subtle">Tanggal masuk</span><span className="mt-1 block">{r.joinedAt || '—'}</span></div>
+                    <div><span className="block text-[10px] uppercase tracking-wider text-subtle">Penanggung jawab</span><span className="mt-1 block truncate">{r.responsiblePerson || '—'}</span></div>
+                    <div><span className="block text-[10px] uppercase tracking-wider text-subtle">Misi rampok</span><span className="mt-1 block">{r.robberyMissionCompleted ? 'Selesai' : 'Belum'}</span></div>
+                    <div><span className="block text-[10px] uppercase tracking-wider text-subtle">Tanggal sumpah darah</span><span className="mt-1 block font-medium text-[#c2a76e]">{r.bloodOathDate || 'Belum dicatat'}</span></div>
+                  </div>
+                </article>
+              ))}
+            </div>
+            <aside className="border-t border-line pt-5 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+              <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Aktivitas terbaru</h2>
+              {timeline.length === 0 ? <p className="mt-4 text-xs text-subtle">Belum ada aktivitas.</p> : <ol className="mt-4 space-y-4">{timeline.map(item => <li key={item.id} className="relative border-l border-line pl-4"><span className="absolute -left-[4px] top-1 h-2 w-2 rounded-full bg-[#a58a55]" /><div className="text-xs font-medium">{item.firstName} {item.lastName}</div><div className="mt-1 text-[10px] text-subtle">{item.bloodOathDate ? `Sumpah darah · ${item.bloodOathDate}` : 'Data relasi diperbarui'}</div><div className="mt-1 text-[10px] text-subtle">{new Date(item.updatedAt || item.createdAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</div></li>)}</ol>}
+            </aside>
           </div>
         </div>
       </div>
@@ -1025,6 +1095,10 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [factions, setFactions] = useState<FactionDef[]>([]);
   const [error, setError] = useState('');
+  const [newAdminName, setNewAdminName] = useState('');
+  const [newAdminDeviceId, setNewAdminDeviceId] = useState('');
+  const [newAdminRole, setNewAdminRole] = useState<Role>('MOD');
+  const [adminSaving, setAdminSaving] = useState(false);
   const isSuper = role === 'SUPER';
 
   const load = useCallback(async () => {
@@ -1056,6 +1130,21 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
     load();
   };
 
+  const addAdmin = async () => {
+    setError('');
+    setAdminSaving(true);
+    try {
+      const res = await fetch('/api/admin/admins', { method: 'POST', headers: staffHeaders(deviceId), body: JSON.stringify({ name: newAdminName, deviceId: newAdminDeviceId, role: newAdminRole === 'SUPER' ? 'SUPERMODERATOR' : 'MODERATOR' }) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Gagal menambahkan moderator');
+      setNewAdminName('');
+      setNewAdminDeviceId('');
+      setNewAdminRole('MOD');
+      await load();
+    } catch (e: any) { setError(e?.message || 'Gagal menambahkan moderator'); }
+    finally { setAdminSaving(false); }
+  };
+
   if (!open) return null;
   const tabs: { id: typeof tab; label: string }[] = [{ id: 'requests', label: 'Requests' }, { id: 'reports', label: 'Reports' }];
   if (isSuper) tabs.push({ id: 'admins', label: 'Admins' }, { id: 'audit', label: 'Audit' }, { id: 'factions', label: 'Factions' });
@@ -1069,9 +1158,18 @@ function AdminPanel({ open, onClose, role, deviceId }: { open: boolean; onClose:
       <nav className="flex gap-2 overflow-x-auto border-b border-line px-4 py-3">{tabs.map(t => <button key={t.id} onClick={() => setTab(t.id)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${tab === t.id ? 'bg-accent text-accent-text' : 'bg-card text-muted'}`}>{t.label}</button>)}</nav>
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         {error && <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">{error}</div>}
-        {tab === 'requests' && <div className="mx-auto max-w-5xl space-y-2">{requests.map(r => <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-card p-4"><div><div className="text-sm font-semibold">{r.status}</div><div className="mt-1 font-mono text-[11px] text-subtle">{r.deviceId} · {r.ipAddress}</div></div><div className="flex gap-2"><button onClick={() => action(r.id, 'APPROVE')} className="rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-500">ACC</button><button onClick={() => action(r.id, 'REVOKE')} className="rounded-lg bg-hover px-3 py-2 text-xs">Revoke</button><button onClick={() => action(r.id, 'BAN')} className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">Ban</button></div></div>)}</div>}
+        {tab === 'requests' && <div className="mx-auto max-w-5xl space-y-2">{requests.map(r => <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-card p-4"><div className="min-w-0"><div className="text-sm font-semibold">{r.status}</div><div className="mt-1 break-all font-mono text-[11px] text-subtle">{r.deviceId} · {r.ipAddress}</div></div><div className="flex items-center gap-2"><CopyButton value={r.deviceId} /><button onClick={() => action(r.id, 'APPROVE')} className="rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-500">ACC</button><button onClick={() => action(r.id, 'REVOKE')} className="rounded-lg bg-hover px-3 py-2 text-xs">Revoke</button><button onClick={() => action(r.id, 'BAN')} className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">Ban</button></div></div>)}</div>}
         {tab === 'reports' && <div className="mx-auto max-w-5xl space-y-2">{reports.map(r => <div key={r.id} className="rounded-xl border border-line bg-card p-4"><div className="text-[11px] text-subtle">{r.deviceId} · {formatDate(r.createdAt)}</div><div className="mt-1 text-sm">{r.message}</div></div>)}</div>}
-        {tab === 'admins' && <div className="mx-auto max-w-5xl space-y-2">{admins.map(a => <div key={a.id} className="flex justify-between rounded-xl border border-line bg-card p-4"><span className="text-sm font-medium">{a.name}</span><span className="text-xs text-muted">{a.role}</span></div>)}</div>}
+        {tab === 'admins' && <div className="mx-auto max-w-5xl space-y-5">
+          <form onSubmit={event => { event.preventDefault(); void addAdmin(); }} className="grid gap-3 rounded-xl border border-line bg-card p-4 sm:grid-cols-2">
+            <label className="text-xs text-muted">Nama moderator<input value={newAdminName} onChange={event => setNewAdminName(event.target.value)} maxLength={60} required placeholder="Nama staff" className="mt-1 w-full rounded-lg border border-line bg-app px-3 py-2.5 text-sm text-main" /></label>
+            <label className="text-xs text-muted">Device ID<input value={newAdminDeviceId} onChange={event => setNewAdminDeviceId(event.target.value.trim())} required placeholder="Device ID moderator" className="mt-1 w-full rounded-lg border border-line bg-app px-3 py-2.5 font-mono text-xs text-main" /></label>
+            <label className="text-xs text-muted sm:col-span-2">Role<select value={newAdminRole} onChange={event => setNewAdminRole(event.target.value as Role)} className="mt-1 w-full rounded-lg border border-line bg-app px-3 py-2.5 text-sm text-main"><option value="MOD">Moderator</option><option value="SUPER">Super Moderator</option></select></label>
+            {newAdminRole === 'SUPER' && <p className="text-[11px] text-[#c2a76e] sm:col-span-2">Super Moderator mendapat hak Super Admin sesuai aturan akses yang berlaku.</p>}
+            <button type="submit" disabled={adminSaving} className="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-accent-text transition-colors hover:bg-accent-hover disabled:opacity-50 sm:col-span-2">{adminSaving ? 'Menambahkan…' : 'Tambah staff'}</button>
+          </form>
+          <div className="space-y-2">{admins.map(a => <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-card p-4"><div className="min-w-0"><div className="text-sm font-medium">{a.name}</div><div className="mt-1 break-all font-mono text-[10px] text-subtle">{a.deviceId}</div></div><div className="flex items-center gap-2"><span className={`rounded-full border px-2.5 py-1 text-[10px] ${a.role === 'SUPER' ? 'border-[#a58a55]/30 bg-[#a58a55]/10 text-[#c2a76e]' : 'border-line text-muted'}`}>{a.role === 'SUPER' ? 'Super Moderator' : 'Moderator'}</span><CopyButton value={a.deviceId} /></div></div>)}</div>
+        </div>}
         {tab === 'audit' && <div className="mx-auto max-w-5xl space-y-2">{logs.map(l => <div key={l.id} className="rounded-xl border border-line bg-card p-4"><div className="text-xs font-semibold">{l.action} · {l.adminName}</div><div className="mt-1 text-[11px] text-muted">{l.details || '-'}</div></div>)}</div>}
         {tab === 'factions' && <div className="mx-auto max-w-5xl grid gap-2 sm:grid-cols-2">{factions.map(f => <div key={f.id} className="rounded-xl border border-line bg-card p-4"><FactionTag fac={f} variant="pill" /><div className="mt-2 text-xs text-muted">{f.label}</div></div>)}</div>}
       </div>
@@ -1103,7 +1201,7 @@ function LockScreen({ deviceId, status, meta, onRefresh }: { deviceId: string; s
         {status === 'TIMEOUT' && meta?.timeoutUntil && <div className="mt-3 text-xs text-muted">Dibuka kembali: {new Date(meta.timeoutUntil).toLocaleString('id-ID')}</div>}
         {message && <div className="mt-4 text-xs text-red-500">{message}</div>}
         {status === 'UNAUTHORIZED' && <button onClick={requestAccess} disabled={loading} className="mt-6 w-full rounded-xl bg-accent py-3 text-sm font-semibold text-accent-text disabled:opacity-50">{loading ? 'Memproses…' : 'Minta Akses'}</button>}
-        <div className="mt-6 break-all rounded-lg bg-hover px-3 py-2 font-mono text-[10px] text-subtle">Device ID: {deviceId}</div>
+        <div className="mt-6 flex items-center justify-between gap-3 rounded-lg bg-hover px-3 py-2"><div className="min-w-0"><div className="text-[10px] text-subtle">Device ID</div><div className="mt-1 break-all font-mono text-[10px] text-muted">{deviceId}</div></div><CopyButton value={deviceId} /></div>
       </section>
     </main>
   );
@@ -1122,6 +1220,28 @@ async function httpError(res: Response): Promise<string> {
 
 function BugIcon({ className }: { className?: string }) {
   return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M8 7h8l1.5 3H6.5L8 7Zm-2 3v5a6 6 0 0 0 12 0v-5M12 10v10M3 13h3m12 0h3M5 8l-2-2m16 2 2-2" /></svg>;
+}
+
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      const input = document.createElement('textarea');
+      input.value = value;
+      input.style.position = 'fixed';
+      input.style.opacity = '0';
+      document.body.appendChild(input);
+      input.select();
+      const copiedText = document.execCommand('copy');
+      input.remove();
+      if (!copiedText) return;
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+  return <button type="button" onClick={copy} className="shrink-0 rounded-md border border-line px-2.5 py-1.5 text-[10px] font-medium text-muted transition-colors hover:border-line-hover hover:text-main" aria-label="Salin Device ID">{copied ? 'Tersalin' : 'Salin'}</button>;
 }
 
 function FactionTag({ fac, variant }: { fac: FactionDef; variant: 'pill' | 'widget' }) {
