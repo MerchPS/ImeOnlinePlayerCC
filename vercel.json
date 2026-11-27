@@ -1,0 +1,7 @@
+{
+  "regions": ["sin1"],
+  "rewrites": [
+    { "source": "/:gate(main|inter)/players.json", "destination": "/api/gate?g=:gate&f=players" },
+    { "source": "/:gate(main|inter)/dynamic.json", "destination": "/api/gate?g=:gate&f=dynamic" }
+  ]
+}
